@@ -1,3 +1,4 @@
+import type { ParsedSettings } from "@/domain/settings";
 import type { NotionGateway } from "@/notion/gateway";
 import { createPageService } from "@/server/page-service";
 import type { BlogRepository, ClaimedRefreshTarget } from "@/server/repositories";
@@ -16,6 +17,12 @@ interface SyncServiceDependencies {
   now?: () => Date;
 }
 
+export interface SyncService {
+  syncPage(pageId: string): Promise<void>;
+  syncSettings(): Promise<ParsedSettings>;
+  claimDueRefreshTargets(nowAt: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
+}
+
 export function createSyncService({
   repository,
   notion,
@@ -32,7 +39,7 @@ export function createSyncService({
       })
     : null;
 
-  return {
+  const service: SyncService = {
     syncPage: pageService.syncPage,
     async syncSettings() {
       if (!settingsService) {
@@ -49,4 +56,6 @@ export function createSyncService({
       return repository.claimDueRefreshTargets(nowAt, workerId, limit);
     }
   };
+
+  return service;
 }

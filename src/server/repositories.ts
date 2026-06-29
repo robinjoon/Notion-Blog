@@ -1,4 +1,5 @@
 import type { SiteHeadSettings } from "@/domain/settings";
+import { simpleRefreshPolicy } from "@/domain/refresh-policy";
 import { createSlug, createUniqueSlug } from "@/domain/slug";
 import { RefreshTargetKind, SlugAliasStatus } from "@/generated/prisma/enums";
 import type { PageSnapshot } from "@/notion/block-collector";
@@ -67,6 +68,8 @@ export interface BlogRepository {
   getSiteSettings(settingsDatabaseId: string): Promise<SiteSettingsSnapshot | null>;
   upsertRefreshTarget(target: RefreshTargetInput): Promise<void>;
   claimDueRefreshTargets(now: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
+  completeRefreshTarget(target: ClaimedRefreshTarget, now: Date): Promise<void>;
+  failRefreshTarget(target: ClaimedRefreshTarget, error: unknown, now: Date): Promise<void>;
   upsertSettingsSnapshot(input: UpsertSettingsSnapshotInput): Promise<void>;
 }
 
@@ -167,6 +170,18 @@ async function slugExists(tx: PrismaTransactionLike, slug: string, pageId: strin
 
 function fallbackRootSlug(pageId: string): string {
   return `/${createSlug("", pageId)}`;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unknown worker error";
 }
 
 async function ensureCanonicalSlug(tx: PrismaTransactionLike, pageId: string, title: string): Promise<string> {
@@ -496,6 +511,60 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
       }
 
       return claimed;
+    },
+
+    async completeRefreshTarget(target, now) {
+      await prisma.refreshTarget.updateMany?.({
+        where: {
+          targetKind: normalizeRefreshTargetKind(target.targetKind),
+          targetId: target.targetId,
+          lockedBy: target.lockedBy
+        },
+        data: {
+          nextRefreshAt: simpleRefreshPolicy(
+            {
+              targetKind: target.targetKind,
+              targetId: target.targetId,
+              failureCount: 0,
+              lastSyncedAt: now
+            },
+            now
+          ),
+          lastSyncedAt: now,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: null,
+          lockedBy: null
+        }
+      });
+    },
+
+    async failRefreshTarget(target, error, now) {
+      const failureCount = target.failureCount + 1;
+
+      await prisma.refreshTarget.updateMany?.({
+        where: {
+          targetKind: normalizeRefreshTargetKind(target.targetKind),
+          targetId: target.targetId,
+          lockedBy: target.lockedBy
+        },
+        data: {
+          nextRefreshAt: simpleRefreshPolicy(
+            {
+              targetKind: target.targetKind,
+              targetId: target.targetId,
+              failureCount,
+              lastSyncedAt: target.lastSyncedAt
+            },
+            now
+          ),
+          lastSyncedAt: target.lastSyncedAt,
+          failureCount,
+          lastError: errorMessage(error),
+          lockedAt: null,
+          lockedBy: null
+        }
+      });
     },
 
     async upsertSettingsSnapshot(input) {

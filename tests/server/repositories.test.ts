@@ -291,4 +291,89 @@ describe("blog repository", () => {
       })
     );
   });
+
+  it("completes a claimed refresh target by clearing the lock and scheduling the next run", async () => {
+    const now = new Date("2026-06-30T00:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      refreshTarget: {
+        updateMany
+      }
+    };
+
+    const repository = createBlogRepository(prisma as never);
+
+    await repository.completeRefreshTarget(
+      {
+        targetKind: "page",
+        targetId: "page-a",
+        nextRefreshAt: new Date("2026-06-29T23:59:00.000Z"),
+        lastSyncedAt: null,
+        failureCount: 2,
+        lastError: "previous failure",
+        lockedAt: now,
+        lockedBy: "worker-a"
+      },
+      now
+    );
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        targetKind: "PAGE",
+        targetId: "page-a",
+        lockedBy: "worker-a"
+      },
+      data: {
+        nextRefreshAt: new Date("2026-06-30T00:15:00.000Z"),
+        lastSyncedAt: now,
+        failureCount: 0,
+        lastError: null,
+        lockedAt: null,
+        lockedBy: null
+      }
+    });
+  });
+
+  it("fails a claimed refresh target by incrementing failures, storing the error, and clearing the lock", async () => {
+    const now = new Date("2026-06-30T00:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      refreshTarget: {
+        updateMany
+      }
+    };
+
+    const repository = createBlogRepository(prisma as never);
+
+    await repository.failRefreshTarget(
+      {
+        targetKind: "settings",
+        targetId: "settings-db",
+        nextRefreshAt: new Date("2026-06-29T23:59:00.000Z"),
+        lastSyncedAt: new Date("2026-06-29T23:00:00.000Z"),
+        failureCount: 1,
+        lastError: null,
+        lockedAt: now,
+        lockedBy: "worker-a"
+      },
+      new Error("notion timeout"),
+      now
+    );
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        targetKind: "SETTINGS",
+        targetId: "settings-db",
+        lockedBy: "worker-a"
+      },
+      data: {
+        nextRefreshAt: new Date("2026-06-30T00:06:00.000Z"),
+        lastSyncedAt: new Date("2026-06-29T23:00:00.000Z"),
+        failureCount: 2,
+        lastError: "notion timeout",
+        lockedAt: null,
+        lockedBy: null
+      }
+    });
+  });
 });
