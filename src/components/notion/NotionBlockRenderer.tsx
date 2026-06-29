@@ -1,5 +1,5 @@
 import type { NotionBlockSnapshot } from "@/notion/block-collector";
-import { RichText } from "@/components/notion/rich-text";
+import { RichText, rewriteNotionHref } from "@/components/notion/rich-text";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -122,6 +122,18 @@ function renderMedia(block: NotionBlockSnapshot, className: string, label: strin
   );
 }
 
+function renderCalloutIcon(icon: unknown): React.ReactNode {
+  if (typeof icon === "string" && icon.length > 0) {
+    return icon;
+  }
+
+  if (isRecord(icon) && icon.type === "emoji" && typeof icon.emoji === "string" && icon.emoji.length > 0) {
+    return icon.emoji;
+  }
+
+  return "!";
+}
+
 function renderHeading(
   block: NotionBlockSnapshot,
   level: 1 | 2 | 3
@@ -191,7 +203,7 @@ export function NotionBlockRenderer({ block }: { block: NotionBlockSnapshot }) {
     case "callout":
       return (
         <div className="notion-block notion-callout">
-          <div aria-hidden="true">{typeof payload.icon === "string" ? payload.icon : "!"}</div>
+          <div aria-hidden="true">{renderCalloutIcon(payload.icon)}</div>
           <div>
             <RichText richText={getRichText(block)} />
             {renderChildren(block)}
@@ -217,7 +229,9 @@ export function NotionBlockRenderer({ block }: { block: NotionBlockSnapshot }) {
     case "bookmark":
       return (
         <div className="notion-block notion-bookmark">
-          {typeof payload.url === "string" ? <a href={payload.url}>{payload.url}</a> : null}
+          {typeof payload.url === "string" ? (
+            <a href={rewriteNotionHref(payload.url)}>{payload.url}</a>
+          ) : null}
         </div>
       );
     case "table":

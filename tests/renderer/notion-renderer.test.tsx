@@ -59,6 +59,53 @@ describe("Notion renderer", () => {
     expect(screen.getByText("Nested quote")).toBeInTheDocument();
   });
 
+  it("rewrites bookmark links that point to Notion pages", () => {
+    render(
+      <NotionPage
+        title="Hello"
+        blocks={[
+          {
+            id: "bookmark",
+            type: "bookmark",
+            hasChildren: false,
+            data: {
+              url: "https://www.notion.so/My-Page-0123456789abcdef0123456789abcdef"
+            },
+            children: []
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/notion/0123456789abcdef0123456789abcdef"
+    );
+  });
+
+  it("renders emoji callout icons from structured icon objects", () => {
+    render(
+      <NotionPage
+        title="Hello"
+        blocks={[
+          {
+            id: "callout",
+            type: "callout",
+            hasChildren: false,
+            data: {
+              rich_text: [{ plain_text: "Heads up" }],
+              icon: { type: "emoji", emoji: "💡" }
+            },
+            children: []
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("💡")).toBeInTheDocument();
+    expect(screen.getByText("Heads up")).toBeInTheDocument();
+  });
+
   it("shows fallback for unsupported blocks", () => {
     render(
       <NotionPage
