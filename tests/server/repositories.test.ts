@@ -321,6 +321,7 @@ describe("blog repository", () => {
       where: {
         targetKind: "PAGE",
         targetId: "page-a",
+        lockedAt: now,
         lockedBy: "worker-a"
       },
       data: {
@@ -364,6 +365,7 @@ describe("blog repository", () => {
       where: {
         targetKind: "SETTINGS",
         targetId: "settings-db",
+        lockedAt: now,
         lockedBy: "worker-a"
       },
       data: {

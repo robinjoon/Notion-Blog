@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runWorkerOnce } from "@/worker/index";
+import { createShutdownController, runWorkerOnce } from "@/worker/index";
 
 describe("worker loop", () => {
   it("syncs claimed settings and page targets and completes each success", async () => {
@@ -132,5 +132,52 @@ describe("worker loop", () => {
       }),
       now
     );
+  });
+
+  it("does not fail a target when completion persistence rejects after sync succeeds", async () => {
+    const now = new Date("2026-06-30T00:00:00.000Z");
+    const completionFailure = new Error("database write failed");
+    const repository = {
+      claimDueRefreshTargets: vi.fn().mockResolvedValue([
+        {
+          targetKind: "page",
+          targetId: "page-a",
+          nextRefreshAt: new Date("2026-06-29T23:59:00.000Z"),
+          lastSyncedAt: null,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: now,
+          lockedBy: "worker-test"
+        }
+      ]),
+      completeRefreshTarget: vi.fn().mockRejectedValue(completionFailure),
+      failRefreshTarget: vi.fn().mockResolvedValue(undefined)
+    };
+    const syncSettings = vi.fn().mockResolvedValue(undefined);
+    const syncPage = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      runWorkerOnce({
+        repository,
+        syncSettings,
+        syncPage,
+        workerId: "worker-test",
+        now,
+        limit: 10
+      })
+    ).rejects.toThrow("database write failed");
+
+    expect(syncPage).toHaveBeenCalledWith("page-a");
+    expect(repository.completeRefreshTarget).toHaveBeenCalledOnce();
+    expect(repository.failRefreshTarget).not.toHaveBeenCalled();
+  });
+
+  it("interrupts idle sleep promptly after shutdown is requested", async () => {
+    const controller = createShutdownController();
+    const wait = controller.wait(60_000);
+
+    controller.requestStop();
+
+    await expect(wait).resolves.toBeUndefined();
   });
 });

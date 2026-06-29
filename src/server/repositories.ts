@@ -518,6 +518,7 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
         where: {
           targetKind: normalizeRefreshTargetKind(target.targetKind),
           targetId: target.targetId,
+          lockedAt: target.lockedAt,
           lockedBy: target.lockedBy
         },
         data: {
@@ -546,6 +547,7 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
         where: {
           targetKind: normalizeRefreshTargetKind(target.targetKind),
           targetId: target.targetId,
+          lockedAt: target.lockedAt,
           lockedBy: target.lockedBy
         },
         data: {
