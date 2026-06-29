@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getPageService } from "@/server/page-service";
+import { getPageCollectionService } from "@/server/page-service";
 
 export async function GET(request: Request, { params }: { params: Promise<{ pageId: string }> }) {
   const { pageId } = await params;
-  const pageService = await getPageService();
+  const pageService = await getPageCollectionService();
   const result = await pageService.collectLinkedPage(pageId);
 
   if (result.kind !== "redirect") {

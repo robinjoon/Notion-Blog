@@ -84,6 +84,50 @@ describe("page service", () => {
     });
   });
 
+  it("returns notFound for the root route when the route exists but cached content is missing", async () => {
+    const repository = {
+      resolveRoute: vi.fn().mockResolvedValue({ kind: "page", pageId: "root-page", slug: "/" }),
+      getPageContent: vi.fn().mockResolvedValue(null),
+      getSiteSettings: vi.fn().mockResolvedValue({ head: {} satisfies SiteHeadSettings }),
+      markPagePrivate: vi.fn(),
+      upsertPageSnapshot: vi.fn()
+    };
+    const service = createPageService({
+      notion: {
+        retrievePage: vi.fn(),
+        retrieveBlockChildren: vi.fn(),
+        querySettingsDatabase: vi.fn()
+      },
+      repository
+    });
+
+    await expect(service.getRootPage()).resolves.toEqual({
+      kind: "notFound"
+    });
+  });
+
+  it("returns notFound for a slug route when the route exists but cached content is missing", async () => {
+    const repository = {
+      resolveRoute: vi.fn().mockResolvedValue({ kind: "page", pageId: "page-a", slug: "/hello" }),
+      getPageContent: vi.fn().mockResolvedValue(null),
+      getSiteSettings: vi.fn().mockResolvedValue({ head: {} satisfies SiteHeadSettings }),
+      markPagePrivate: vi.fn(),
+      upsertPageSnapshot: vi.fn()
+    };
+    const service = createPageService({
+      notion: {
+        retrievePage: vi.fn(),
+        retrieveBlockChildren: vi.fn(),
+        querySettingsDatabase: vi.fn()
+      },
+      repository
+    });
+
+    await expect(service.getPageBySlug("hello")).resolves.toEqual({
+      kind: "notFound"
+    });
+  });
+
   it("collects a linked page and redirects to its canonical slug", async () => {
     const snapshot = createSnapshot("page-a", "Hello");
     const storedPages = new Map<string, ReturnType<typeof createPageRecord>>([

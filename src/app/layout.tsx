@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import "./globals.css";
 import { getPageService } from "@/server/page-service";
@@ -14,9 +15,13 @@ function toMetadataBase(baseUrl?: string): URL | undefined {
   }
 }
 
-export async function generateMetadata(): Promise<Metadata> {
+const getCachedSiteHeadSettings = cache(async () => {
   const pageService = await getPageService();
-  const head = await pageService.getSiteHeadSettings();
+  return pageService.getSiteHeadSettings();
+});
+
+export async function generateMetadata(): Promise<Metadata> {
+  const head = await getCachedSiteHeadSettings();
 
   return {
     metadataBase: toMetadataBase(head.baseUrl),
@@ -47,8 +52,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const pageService = await getPageService();
-  const head = await pageService.getSiteHeadSettings();
+  const head = await getCachedSiteHeadSettings();
 
   return (
     <html lang={head.language ?? "ko"}>

@@ -19,6 +19,18 @@ export type PageLookupResult =
   | { kind: "redirect"; destination: string }
   | { kind: "notFound" };
 
+const unconfiguredNotionGateway: NotionGateway = {
+  async retrievePage() {
+    throw new Error("notion sync is not configured");
+  },
+  async retrieveBlockChildren() {
+    throw new Error("notion sync is not configured");
+  },
+  async querySettingsDatabase() {
+    throw new Error("notion sync is not configured");
+  }
+};
+
 function normalizeSlug(slug: string): string {
   if (!slug) {
     return "/";
@@ -161,14 +173,19 @@ export function createPageService({
 }
 
 export async function getPageService() {
+  const { prisma } = await import("@/server/db");
+
+  return createPageService({
+    notion: unconfiguredNotionGateway,
+    repository: createBlogRepository(prisma),
+    settingsDatabaseId: process.env.SETTINGS_DATABASE_ID
+  });
+}
+
+export async function getPageCollectionService() {
   const notionToken = process.env.NOTION_TOKEN;
   if (!notionToken) {
     throw new Error("NOTION_TOKEN is required");
-  }
-
-  const settingsDatabaseId = process.env.SETTINGS_DATABASE_ID;
-  if (!settingsDatabaseId) {
-    throw new Error("SETTINGS_DATABASE_ID is required");
   }
 
   const { prisma } = await import("@/server/db");
@@ -176,6 +193,6 @@ export async function getPageService() {
   return createPageService({
     notion: createNotionGateway(notionToken),
     repository: createBlogRepository(prisma),
-    settingsDatabaseId
+    settingsDatabaseId: process.env.SETTINGS_DATABASE_ID
   });
 }
