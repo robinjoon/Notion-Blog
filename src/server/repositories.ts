@@ -63,40 +63,61 @@ export interface BlogRepository {
   upsertPageSnapshot(input: UpsertPageSnapshotInput): Promise<void>;
   markPagePrivate(input: MarkPagePrivateInput): Promise<void>;
   resolveRoute(slug: string): Promise<RouteResolution>;
+  getPageContent(pageId: string): Promise<CachedPageContent | null>;
+  getSiteSettings(settingsDatabaseId: string): Promise<SiteSettingsSnapshot | null>;
   upsertRefreshTarget(target: RefreshTargetInput): Promise<void>;
   claimDueRefreshTargets(now: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
   upsertSettingsSnapshot(input: UpsertSettingsSnapshotInput): Promise<void>;
 }
 
+export interface CachedPageContent {
+  pageId: string;
+  title: string;
+  notionUrl: string;
+  publicUrl: string;
+  lastEditedTime: Date | null;
+  slug: string;
+  snapshot: PageSnapshot;
+}
+
+export interface SiteSettingsSnapshot {
+  settingsDatabaseId: string;
+  rootPageId: string;
+  headerPageId?: string;
+  footerPageId?: string;
+  head: SiteHeadSettings;
+}
+
 type PrismaTransactionLike = {
   notionPage: {
-    findUnique?: (args: unknown) => Promise<any>;
-    upsert: (args: unknown) => Promise<unknown>;
-    update?: (args: unknown) => Promise<unknown>;
+    findUnique?: (...args: any[]) => Promise<any>;
+    upsert: (...args: any[]) => Promise<unknown>;
+    update?: (...args: any[]) => Promise<unknown>;
   };
   pageRoute: {
-    findUnique?: (args: unknown) => Promise<any>;
-    findFirst?: (args: unknown) => Promise<any>;
-    upsert: (args: unknown) => Promise<unknown>;
-    updateMany?: (args: unknown) => Promise<unknown>;
+    findUnique?: (...args: any[]) => Promise<any>;
+    findFirst?: (...args: any[]) => Promise<any>;
+    upsert: (...args: any[]) => Promise<unknown>;
+    updateMany?: (...args: any[]) => Promise<unknown>;
   };
   slugAlias: {
-    findUnique?: (args: unknown) => Promise<any>;
-    findMany?: (args: unknown) => Promise<any[]>;
-    upsert?: (args: unknown) => Promise<unknown>;
-    updateMany?: (args: unknown) => Promise<unknown>;
+    findUnique?: (...args: any[]) => Promise<any>;
+    findMany?: (...args: any[]) => Promise<any[]>;
+    upsert?: (...args: any[]) => Promise<unknown>;
+    updateMany?: (...args: any[]) => Promise<unknown>;
   };
   pageSnapshot: {
-    upsert: (args: unknown) => Promise<unknown>;
+    findUnique?: (...args: any[]) => Promise<any>;
+    upsert: (...args: any[]) => Promise<unknown>;
   };
   refreshTarget: {
-    findMany?: (args: unknown) => Promise<RefreshTargetRecord[]>;
-    upsert: (args: unknown) => Promise<unknown>;
-    updateMany?: (args: unknown) => Promise<{ count: number }>;
+    findMany?: (...args: any[]) => Promise<RefreshTargetRecord[]>;
+    upsert: (...args: any[]) => Promise<unknown>;
+    updateMany?: (...args: any[]) => Promise<{ count: number }>;
   };
   siteSettings: {
-    findUnique?: (args: unknown) => Promise<any>;
-    upsert: (args: unknown) => Promise<unknown>;
+    findUnique?: (...args: any[]) => Promise<any>;
+    upsert: (...args: any[]) => Promise<unknown>;
   };
 };
 
@@ -356,6 +377,48 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
       }
 
       return { kind: "not-found" };
+    },
+
+    async getPageContent(pageId) {
+      const page = await prisma.notionPage.findUnique?.({
+        where: { pageId },
+        include: {
+          route: true,
+          snapshot: true
+        }
+      });
+
+      if (!page?.publicUrl || !page.route?.isActive || !page.snapshot?.snapshotJson) {
+        return null;
+      }
+
+      return {
+        pageId: page.pageId,
+        title: page.title,
+        notionUrl: page.notionUrl,
+        publicUrl: page.publicUrl,
+        lastEditedTime: page.lastEditedTime ?? null,
+        slug: page.route.canonicalSlug,
+        snapshot: page.snapshot.snapshotJson as PageSnapshot
+      };
+    },
+
+    async getSiteSettings(settingsDatabaseId) {
+      const settings = await prisma.siteSettings.findUnique?.({
+        where: { settingsDatabaseId }
+      });
+
+      if (!settings) {
+        return null;
+      }
+
+      return {
+        settingsDatabaseId: settings.settingsDatabaseId,
+        rootPageId: settings.rootPageId,
+        headerPageId: settings.headerPageId ?? undefined,
+        footerPageId: settings.footerPageId ?? undefined,
+        head: settings.headJson as SiteHeadSettings
+      };
     },
 
     async upsertRefreshTarget(target) {
