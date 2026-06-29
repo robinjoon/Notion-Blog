@@ -11,6 +11,9 @@
 *.swp
 *.swo
 
+# Superpowers local workflow state
+.superpowers/
+
 # Logs
 logs/
 *.log
@@ -63,6 +66,7 @@ blob-report/
 *.sqlite
 *.sqlite3
 prisma/dev.db*
+src/generated/prisma/
 
 # Docker and local compose overrides
 docker-compose.override.yml

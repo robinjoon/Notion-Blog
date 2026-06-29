@@ -12,7 +12,8 @@
 
 - Project name: `Notion-Blog`.
 - Package manager: `pnpm`.
-- Runtime target: Node.js 20 LTS or newer.
+- Runtime target: Node.js 24 LTS or newer. Production Docker images use the Node 24 LTS line.
+- Helm target: Helm v4.2.2 or newer.
 - Normal content pages are public only when Notion `public_url` is present.
 - The settings database is private and accessed only through the Notion integration.
 - The settings database MVP keys are `rootPage`, `header`, `footer`, and `head`.
@@ -41,6 +42,9 @@ Create this structure as tasks progress:
 ├── next.config.ts
 ├── package.json
 ├── pnpm-lock.yaml
+├── prisma.config.ts
+├── public/
+│   └── .gitkeep
 ├── prisma/
 │   └── schema.prisma
 ├── src/
@@ -63,6 +67,9 @@ Create this structure as tasks progress:
 │   │   ├── block-collector.ts
 │   │   ├── gateway.ts
 │   │   └── page-mapper.ts
+│   ├── generated/
+│   │   └── prisma/
+│   │       └── client.ts
 │   ├── server/
 │   │   ├── db.ts
 │   │   ├── page-service.ts
@@ -167,12 +174,11 @@ export interface NotionBlockSnapshot {
 - Create: `src/app/page.tsx`
 - Create: `src/app/not-found.tsx`
 - Create: `src/app/globals.css`
-- Create: `src/server/db.ts`
+- Create: `public/.gitkeep`
 - Create: `tests/smoke/scaffold.test.ts`
 
 **Interfaces:**
-- Produces: runnable `pnpm` scripts: `dev`, `build`, `start`, `test`, `test:run`, `typecheck`, `lint`, `worker`, `db:generate`, `db:migrate`.
-- Produces: `src/server/db.ts` export `prisma: PrismaClient`.
+- Produces: package scripts: `dev`, `build`, `start`, `test`, `test:run`, `typecheck`, `worker`, `db:generate`, `db:migrate`.
 
 - [ ] **Step 1: Create package manifest**
 
@@ -183,11 +189,14 @@ Create `package.json`:
   "name": "notion-blog",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
@@ -196,25 +205,29 @@ Create `package.json`:
     "db:migrate": "prisma migrate deploy"
   },
   "dependencies": {
-    "@notionhq/client": "^2.2.15",
-    "@prisma/client": "^5.22.0",
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zod": "^3.24.0"
+    "@notionhq/client": "^5.22.0",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "next": "^16.2.9",
+    "pg": "^8.22.0",
+    "prisma": "^7.8.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsx": "^4.22.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "jsdom": "^25.0.1",
-    "prisma": "^5.22.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
   }
 }
 ```
@@ -363,21 +376,9 @@ body {
 }
 ```
 
-- [ ] **Step 6: Add Prisma client singleton**
+- [ ] **Step 6: Add public directory placeholder**
 
-Create `src/server/db.ts`:
-
-```ts
-import { PrismaClient } from "@prisma/client";
-
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
-```
+Create `public/.gitkeep` as an empty file so Docker builds can copy the `public` directory consistently.
 
 - [ ] **Step 7: Add scaffold smoke test**
 
@@ -387,9 +388,10 @@ Create `tests/smoke/scaffold.test.ts`:
 import { describe, expect, it } from "vitest";
 
 describe("project scaffold", () => {
-  it("uses the expected package name", async () => {
+  it("uses the expected package name and Node runtime floor", async () => {
     const manifest = await import("../../package.json");
     expect(manifest.default.name).toBe("notion-blog");
+    expect(manifest.default.engines.node).toBe(">=24.0.0");
   });
 });
 ```
@@ -408,7 +410,7 @@ Expected: both commands exit 0.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add package.json pnpm-lock.yaml tsconfig.json next.config.ts vitest.config.ts .env.example src/app src/server/db.ts tests/smoke/scaffold.test.ts
+git add package.json pnpm-lock.yaml tsconfig.json next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
 git commit -m "chore: scaffold notion blog app"
 ```
 
@@ -416,11 +418,14 @@ git commit -m "chore: scaffold notion blog app"
 
 **Files:**
 - Create: `prisma/schema.prisma`
+- Create: `prisma.config.ts`
+- Create: `src/server/db.ts`
 - Create: `tests/server/prisma-schema.test.ts`
 
 **Interfaces:**
 - Produces Prisma models: `SiteSettings`, `NotionPage`, `PageRoute`, `SlugAlias`, `PageSnapshot`, `RefreshTarget`, `SyncRun`.
 - Produces enums: `SlugAliasStatus`, `RefreshTargetKind`, `SyncRunStatus`.
+- Produces: `src/server/db.ts` export `prisma: PrismaClient`.
 
 - [ ] **Step 1: Write schema validation test**
 
@@ -432,6 +437,15 @@ import { readFileSync } from "node:fs";
 
 describe("Prisma schema", () => {
   const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const config = readFileSync("prisma.config.ts", "utf8");
+
+  it("uses the Prisma 7 generated client", () => {
+    expect(schema).toContain("provider = \"prisma-client\"");
+    expect(schema).toContain("output   = \"../src/generated/prisma\"");
+    expect(schema).not.toMatch(/url\s*=\s*env\("DATABASE_URL"\)/);
+    expect(config).toContain("defineConfig");
+    expect(config).toContain("env(\"DATABASE_URL\")");
+  });
 
   it("defines publishing state models", () => {
     expect(schema).toContain("model SiteSettings");
@@ -444,8 +458,8 @@ describe("Prisma schema", () => {
   });
 
   it("keeps canonical slugs and aliases unique", () => {
-    expect(schema).toContain("canonicalSlug String  @unique");
-    expect(schema).toContain("slug      String            @unique");
+    expect(schema).toContain("canonicalSlug String     @unique");
+    expect(schema).toContain("slug      String          @unique");
   });
 });
 ```
@@ -458,21 +472,43 @@ Run:
 pnpm test:run tests/server/prisma-schema.test.ts
 ```
 
-Expected: FAIL because `prisma/schema.prisma` does not exist.
+Expected: FAIL because `prisma/schema.prisma` and `prisma.config.ts` do not exist.
 
-- [ ] **Step 3: Create Prisma schema**
+- [ ] **Step 3: Create Prisma schema and config**
 
 Create `prisma/schema.prisma`:
 
 ```prisma
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
+```
+
+Create `prisma.config.ts`:
+
+```ts
+import "dotenv/config";
+import { defineConfig, env } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    path: "prisma/migrations"
+  },
+  datasource: {
+    url: env("DATABASE_URL")
+  }
+});
+```
+
+Append the enums and models below the datasource block in `prisma/schema.prisma`:
+
+```prisma
 
 enum SlugAliasStatus {
   ACTIVE
@@ -573,21 +609,50 @@ model SyncRun {
 }
 ```
 
-- [ ] **Step 4: Verify schema and generated client**
+- [ ] **Step 4: Add Prisma client singleton**
+
+Create `src/server/db.ts`:
+
+```ts
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@/generated/prisma/client";
+
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
+function createPrismaClient() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is required");
+  }
+
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString })
+  });
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}
+```
+
+- [ ] **Step 5: Verify schema and generated client**
 
 Run:
 
 ```bash
 pnpm db:generate
 pnpm test:run tests/server/prisma-schema.test.ts
+pnpm typecheck
 ```
 
-Expected: both commands exit 0.
+Expected: all commands exit 0 and `src/generated/prisma/client.ts` exists.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add prisma/schema.prisma tests/server/prisma-schema.test.ts
+git add prisma/schema.prisma prisma.config.ts src/server/db.ts tests/server/prisma-schema.test.ts
 git commit -m "feat: add publishing database schema"
 ```
 
@@ -1320,13 +1385,13 @@ Expected: FAIL because chart files do not exist.
 Create `Dockerfile`:
 
 ```dockerfile
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
@@ -1334,17 +1399,19 @@ COPY . .
 RUN pnpm db:generate
 RUN pnpm build
 
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN corepack enable
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/src ./src
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["pnpm", "start"]
 ```
 
 Create `.dockerignore`:
@@ -1439,6 +1506,8 @@ Notion-Blog renders a Notion root page as a self-hosted public blog.
 
 ## Required Environment
 
+- Node.js 24 LTS or newer
+- Helm v4.2.2 or newer
 - `DATABASE_URL`
 - `NOTION_TOKEN`
 - `SETTINGS_DATABASE_ID`
@@ -1498,7 +1567,7 @@ git commit -m "docs: add setup and settings documentation"
   - `RefreshTargetKind` is only `"settings" | "page"` in TypeScript and `SETTINGS | PAGE` in Prisma.
   - `ParsedSettings.rootPageId` is the source for `/`.
   - `SETTINGS_DATABASE_ID` remains the only Notion settings environment ID.
-  - `ROOT_PAGE_ID` is not used.
+  - Root page selection is read from the settings database, not from a separate environment variable.
 - Verification gates:
   - Each task has a failing-test step before implementation.
   - Each task ends with exact commands and a commit.
