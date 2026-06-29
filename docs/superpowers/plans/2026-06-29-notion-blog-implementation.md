@@ -235,7 +235,19 @@ Create `package.json`:
 }
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [ ] **Step 2: Create pnpm workspace approvals**
+
+Create `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: true
+```
+
+- [ ] **Step 3: Install dependencies**
 
 Run:
 
@@ -245,7 +257,7 @@ pnpm install
 
 Expected: exit 0 and a new `pnpm-lock.yaml`.
 
-- [ ] **Step 3: Add TypeScript and Next config**
+- [ ] **Step 4: Add TypeScript and Next config**
 
 Create `tsconfig.json`:
 
@@ -253,7 +265,11 @@ Create `tsconfig.json`:
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "ES2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES2022"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
@@ -263,14 +279,29 @@ Create `tsconfig.json`:
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "paths": {
-      "@/*": ["./src/*"]
-    }
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
 ```
 
@@ -307,7 +338,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Add environment example**
+- [ ] **Step 5: Add environment example**
 
 Create `.env.example`:
 
@@ -317,7 +348,7 @@ NOTION_TOKEN="secret_xxx"
 SETTINGS_DATABASE_ID="00000000000000000000000000000000"
 ```
 
-- [ ] **Step 5: Add minimal app shell**
+- [ ] **Step 6: Add minimal app shell**
 
 Create `src/app/layout.tsx`:
 
@@ -379,11 +410,11 @@ body {
 }
 ```
 
-- [ ] **Step 6: Add public directory placeholder**
+- [ ] **Step 7: Add public directory placeholder**
 
 Create `public/.gitkeep` as an empty file so Docker builds can copy the `public` directory consistently.
 
-- [ ] **Step 7: Add scaffold smoke test**
+- [ ] **Step 8: Add scaffold smoke test**
 
 Create `tests/smoke/scaffold.test.ts`:
 
@@ -399,7 +430,7 @@ describe("project scaffold", () => {
 });
 ```
 
-- [ ] **Step 8: Verify scaffold**
+- [ ] **Step 9: Verify scaffold**
 
 Run:
 
@@ -410,7 +441,7 @@ pnpm typecheck
 
 Expected: both commands exit 0.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json next-env.d.ts next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
