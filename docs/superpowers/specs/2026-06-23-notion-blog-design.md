@@ -2,7 +2,7 @@
 
 ## 목적
 
-Notion 페이지 그래프를 공개 블로그로 변환하는 셀프 호스팅 블로그 애플리케이션을 만든다. 이 제품은 Notion을 글 작성 도구로 사용하면서, 별도 앱이 완성도 있는 웹사이트를 제공한다는 Oopy의 핵심 가치를 참고한다. 첫 버전은 유료 블로그 도구 없이 사용자의 기존 k3s 서버에서 실행되는 것을 목표로 한다.
+`Notion-Blog`는 Notion 페이지를 공개 블로그로 변환하는 셀프 호스팅 블로그 애플리케이션이다. 이 제품은 Notion을 글 작성 도구로 사용하면서, 별도 앱이 완성도 있는 웹사이트를 제공한다는 Oopy의 핵심 가치를 참고한다. 첫 버전은 유료 블로그 도구 없이 사용자의 기존 k3s 서버에서 실행되는 것을 목표로 한다.
 
 이 애플리케이션은 Notion 공개 페이지를 스크래핑하지 않는다. 콘텐츠 수집, 캐싱, 라우트 생성, 렌더링은 공식 Notion API로 처리한다. 일반 콘텐츠 페이지가 블로그에 노출될 수 있는지는 Notion public share 상태를 기준으로 판단한다.
 
@@ -10,7 +10,8 @@ Notion 페이지 그래프를 공개 블로그로 변환하는 셀프 호스팅 
 
 - Notion은 콘텐츠 편집 도구이자 접근 제어 표면으로 남긴다.
 - 앱은 캐시, 라우트, 리다이렉트, SEO 친화 렌더링, 헤더, 푸터, 커스텀 CSS 같은 웹 퍼블리싱 관심사를 책임진다.
-- 블로그 페이지는 설정된 루트 Notion 페이지에서 도달 가능한 Notion 페이지를 탐색해 발견한다.
+- 블로그의 첫 화면은 설정 DB에 지정된 루트 Notion 페이지를 그대로 렌더링한다.
+- 루트 페이지나 다른 렌더링된 페이지 안의 Notion 페이지 링크는 블로그 내부 링크로 변환하고, 사용자가 접근할 때 해당 페이지를 수집하고 캐시한다.
 - 설정 데이터베이스는 Notion에서 비공개로 두고, Notion integration을 통해서만 앱이 읽는다.
 - 첫 버전은 복잡한 알고리즘보다 작고 안정적이며 확장 가능한 구조를 우선한다.
 
@@ -19,7 +20,8 @@ Notion 페이지 그래프를 공개 블로그로 변환하는 셀프 호스팅 
 ### MVP에 포함
 
 - Notion API 기반 페이지 및 블록 수집.
-- 블로그 페이지 발견을 위한 루트 페이지 그래프 탐색.
+- 설정 DB에 지정된 루트 페이지 렌더링.
+- 렌더링 중 발견한 Notion 페이지 링크의 내부 링크 변환 및 lazy 수집.
 - 각 페이지의 Notion `public_url`을 기준으로 하는 public share 기반 노출 제어.
 - 전역 사이트 설정을 위한 비공개 설정 데이터베이스.
 - PostgreSQL 기반 페이지 캐시, 라우트 상태, 스냅샷, slug 별칭, 갱신 상태 저장.
@@ -47,14 +49,15 @@ Notion 페이지 그래프를 공개 블로그로 변환하는 셀프 호스팅 
 1. 웹 앱
    - Next.js로 실행된다.
    - 공개 블로그 라우트를 제공한다.
-   - 일반 페이지 렌더링 중에는 PostgreSQL의 스냅샷과 라우트 테이블만 읽는다.
-   - 방문자 요청 처리 중에는 Notion API를 호출하지 않는다.
+   - 캐시된 페이지 렌더링 중에는 PostgreSQL의 스냅샷과 라우트 테이블을 우선 읽는다.
+   - 아직 캐시되지 않은 내부 Notion 페이지 링크로 접근한 경우에는 같은 동기화 파이프라인을 통해 제한된 on-demand 수집을 시도할 수 있다.
 
 2. 동기화 worker
    - 같은 코드베이스에서 별도 프로세스 또는 k3s Deployment로 실행된다.
    - PostgreSQL에서 갱신 시점이 된 갱신 대상(refresh target)을 읽는다.
    - 요청 제한(rate limit)을 지키며 Notion API를 호출한다.
    - 설정, 페이지 메타데이터, 블록 스냅샷, 라우트 상태, slug 별칭, 갱신 상태를 업데이트한다.
+   - on-demand 수집과 주기 갱신이 같은 저장 모델과 rate limit 규칙을 사용하도록 한다.
 
 3. 마이그레이션 job
    - 배포 전 또는 배포 중 Prisma migration을 실행한다.
@@ -85,23 +88,55 @@ PostgreSQL은 단순 임시 캐시가 아니라 퍼블리싱 상태 저장소다
 
 ### 콘텐츠 루트
 
-`ROOT_PAGE_ID`는 블로그의 첫 진입 페이지를 가리킨다. 동기화 worker는 이 페이지에서 그래프 탐색을 시작한다.
+설정 데이터베이스의 `rootPage` 항목은 블로그의 첫 진입 페이지를 가리킨다. 이 페이지는 블로그의 `/` 경로로 렌더링한다.
 
-루트 페이지에서 도달 가능한 페이지는 블로그 페이지 후보가 된다. 초기 도달성 판단은 child page와 Notion API가 블록 데이터로 노출하는 page link 같은 직접적인 Notion 페이지 구조를 포함한다. 그래프 탐색 로직은 나중에 추가 연결(edge) 타입을 쉽게 넣을 수 있도록 별도 모듈 경계 뒤에 둔다.
+앱은 루트 페이지에서 별도 그래프 탐색을 선행하지 않는다. 대신 렌더러가 Notion 페이지 링크를 만났을 때 그 링크를 블로그 내부 링크로 변환한다. 방문자가 해당 내부 링크에 접근하면 앱이 대상 페이지의 공개 상태를 확인하고, 필요하면 수집하고 캐시한다.
+
+내부 링크 변환은 명시적인 Notion 페이지 참조만 대상으로 한다. 외부 URL은 원래 링크로 유지한다.
 
 ### 설정 데이터베이스
 
-`SETTINGS_DATABASE_ID`는 전역 사이트 설정에 사용하는 비공개 Notion 데이터베이스 또는 페이지를 가리킨다. 이 설정 소스는 루트 페이지 그래프에서 발견되지 않으며, 절대 블로그 라우트가 되지 않는다.
+`SETTINGS_DATABASE_ID`는 전역 사이트 설정에 사용하는 비공개 Notion 데이터베이스를 가리킨다. 이 설정 소스는 일반 블로그 콘텐츠로 렌더링하지 않으며, 절대 블로그 라우트가 되지 않는다.
 
-MVP 설정 항목:
+설정 데이터베이스 이름은 `Notion-Blog Settings`를 권장한다. MVP에서는 고정 key를 가진 row 기반 schema를 사용한다.
 
-- 사이트 제목.
-- 사이트 설명.
-- 로고 URL 또는 Notion file reference.
-- 파비콘 URL 또는 Notion file reference.
-- 헤더 링크.
-- 푸터 콘텐츠.
-- 커스텀 CSS.
+필수 속성:
+
+- `Key`: title. 설정 key이며 `rootPage`, `header`, `footer`, `head` 값을 사용한다.
+- `Kind`: select. 값의 종류이며 `page`, `blocks`, `head` 중 하나를 사용한다.
+- `Enabled`: checkbox. 해당 설정 사용 여부.
+- `Page`: url 또는 rich text. `rootPage`가 가리키는 Notion 페이지 URL 또는 page ID.
+- `Data`: rich text. JSON이 필요한 설정을 저장한다.
+- `Notes`: rich text. 사람이 읽는 설명. 앱 동작에는 사용하지 않는다.
+
+고정 row:
+
+- `rootPage`: `Kind = page`. `Page`에 블로그 첫 진입 Notion 페이지 URL 또는 page ID를 저장한다.
+- `header`: `Kind = blocks`. 해당 row page의 본문 블록을 전역 header로 렌더링한다.
+- `footer`: `Kind = blocks`. 해당 row page의 본문 블록을 전역 footer로 렌더링한다.
+- `head`: `Kind = head`. `Data`에 `<head>` 및 OG/Twitter/meta 설정 JSON을 저장한다.
+
+`header`와 `footer` row page의 본문 블록은 설정 조각으로만 읽는다. 일반 콘텐츠 페이지가 아니므로 Notion public share를 요구하지 않고, 블로그 라우트로도 노출하지 않는다.
+
+`head` row의 `Data` JSON은 다음 필드를 지원한다.
+
+- `language`
+- `siteName`
+- `defaultTitle`
+- `titleTemplate`
+- `defaultDescription`
+- `baseUrl`
+- `logoUrl`
+- `faviconUrl`
+- `ogTitle`
+- `ogDescription`
+- `ogImageUrl`
+- `ogType`
+- `twitterCard`
+- `twitterSite`
+- `robots`
+- `customCss`
+- `customHeadHtml`
 
 설정 파서는 나중에 페이지별 override 섹션을 추가할 수 있는 구조화된 표현을 받아야 한다. 단, MVP에서는 페이지별 override를 구현하지 않는다.
 
@@ -111,7 +146,7 @@ MVP 설정 항목:
 
 규칙:
 
-- 도달 가능한 페이지에 `public_url`이 있으면 블로그에 노출할 수 있다.
+- 루트 페이지이거나 내부 Notion 페이지 링크로 접근한 페이지에 `public_url`이 있으면 블로그에 노출할 수 있다.
 - `public_url`이 없거나 null로 바뀌면 해당 페이지는 공개 콘텐츠로 서빙하면 안 된다.
 - 설정 데이터베이스는 비공개로 유지하고 Notion integration에만 공유한다.
 - worker는 오래된 공개 상태 가정을 업데이트하거나 서빙하기 전에 public 상태를 갱신해야 한다.
@@ -131,7 +166,6 @@ MVP 설정 항목:
 초기 갱신 정책:
 
 - 설정: 짧은 주기, 약 1분.
-- 그래프 탐색: 중간 주기, 약 5분.
 - 일반 페이지: 중간 주기, 약 10-15분.
 - 실패한 대상: 단순 재시도 지연(backoff)으로 재시도.
 
@@ -140,7 +174,7 @@ MVP 설정 항목:
 권장 인터페이스 형태:
 
 ```ts
-type RefreshTargetKind = "settings" | "graph" | "page";
+type RefreshTargetKind = "settings" | "page";
 
 interface RefreshPolicy {
   nextRefreshAt(target: RefreshTarget, now: Date): Date;
@@ -150,15 +184,16 @@ interface RefreshPolicy {
 ## 동기화 흐름
 
 1. worker가 비공개 설정 소스에서 전역 설정을 읽는다.
-2. graph target의 갱신 시점이 되었으면 worker가 루트 그래프를 갱신한다.
-3. 그래프 탐색은 도달 가능한 Notion page ID를 페이지 후보로 기록한다.
-4. 갱신 시점이 된 각 페이지에 대해 worker가 Notion page retrieval을 호출해 제목, `public_url`, `last_edited_time`을 확인한다.
-5. `public_url`이 없으면 앱은 해당 페이지를 비공개로 표시하고 서빙을 중단한다.
-6. 페이지가 공개 상태이고 `last_edited_time`이 바뀌었으면 worker가 block children을 재귀적으로 가져와 새 스냅샷을 저장한다.
-7. worker가 제목 기반 canonical slug를 계산한다.
-8. canonical slug가 바뀌었으면 이전 slug를 해당 페이지의 alias로 추가한다.
-9. 해당 페이지의 모든 과거 slug는 현재 canonical slug로 직접 리다이렉트된다.
-10. worker가 refresh policy를 통해 `next_refresh_at`을 업데이트한다.
+2. `rootPage` 설정이 가리키는 페이지를 루트 페이지 refresh target으로 등록한다.
+3. 갱신 시점이 된 각 페이지에 대해 worker가 Notion page retrieval을 호출해 제목, `public_url`, `last_edited_time`을 확인한다.
+4. `public_url`이 없으면 앱은 해당 페이지를 비공개로 표시하고 서빙을 중단한다.
+5. 페이지가 공개 상태이고 `last_edited_time`이 바뀌었으면 worker가 block children을 재귀적으로 가져와 새 스냅샷을 저장한다.
+6. 스냅샷 안의 Notion 페이지 링크는 렌더링 시 블로그 내부 링크로 변환한다.
+7. 방문자가 내부 링크에 접근했는데 대상 페이지가 아직 캐시되지 않았으면, 앱은 해당 페이지를 refresh target으로 등록하고 사용 가능한 경우 즉시 수집을 시도한다.
+8. worker가 제목 기반 canonical slug를 계산한다. 루트 페이지는 예외적으로 `/` 경로를 대표 route로 사용한다.
+9. canonical slug가 바뀌었으면 이전 slug를 해당 페이지의 alias로 추가한다.
+10. 해당 페이지의 모든 과거 slug는 현재 canonical slug로 직접 리다이렉트된다.
+11. worker가 refresh policy를 통해 `next_refresh_at`을 업데이트한다.
 
 ## 라우팅과 slug
 
@@ -167,6 +202,7 @@ interface RefreshPolicy {
 규칙:
 
 - slug는 기본적으로 제목 기반이다.
+- 루트 페이지는 설정 DB의 `rootPage`가 가리키는 페이지이며, 대표 route로 `/`를 사용한다.
 - 한국어와 비라틴 문자 제목은 transliteration하지 않고 읽을 수 있는 형태로 slug에 남길 수 있다.
 - 현재 slug가 중복되면 짧고 안정적인 page ID suffix로 구분한다.
 - 제목 변경으로 slug가 바뀌면 이전 대표 slug를 별칭(alias)으로 저장한다.
@@ -344,7 +380,6 @@ Helm chart는 다음 리소스를 템플릿으로 제공한다.
 - `env.existingSecret`로 참조되는 Kubernetes Secret. 이 Secret은 다음 환경 변수를 제공한다.
   - `DATABASE_URL`
   - `NOTION_TOKEN`
-  - `ROOT_PAGE_ID`
   - `SETTINGS_DATABASE_ID`
 - 웹 앱 readiness probe와 liveness probe.
 - 진행 중인 sync job을 마치거나 lock을 해제할 수 있는 worker graceful shutdown.
@@ -400,7 +435,7 @@ Helm chart는 다음 리소스를 템플릿으로 제공한다.
 - 관리자 UI.
 - 수동 refresh endpoint.
 - 다중 사이트 지원.
-- 추가 그래프 연결(edge) 탐색.
+- 더 넓은 Notion 링크 해석.
 - 더 완전한 Notion block coverage.
 - 공개 Notion URL import.
 
@@ -411,11 +446,13 @@ Helm chart는 다음 리소스를 템플릿으로 제공한다.
 - 공개 페이지 스크래핑이 아니라 공식 Notion API를 사용한다.
 - 일반 페이지의 접근 제어는 Notion public share를 기준으로 한다.
 - 설정은 private으로 유지하고 integration으로만 접근한다.
-- 루트 페이지 그래프에서 페이지를 발견한다.
+- 프로젝트 이름은 `Notion-Blog`다.
+- 설정 DB의 `rootPage`가 가리키는 페이지를 `/`에 렌더링한다.
+- 별도 그래프 탐색을 선행하지 않고, 렌더링된 Notion 페이지 링크를 내부 링크로 변환해 lazy 수집한다.
 - 확장 가능한 policy 경계를 유지하되, 초기에는 단순한 target별 refresh interval을 사용한다.
 - 페이지 제목에서 route를 생성한다.
 - 모든 과거 slug는 최신 대표 slug로 직접 리다이렉트한다.
-- 설정 데이터베이스 MVP 범위는 전역 설정으로 제한한다.
+- 설정 데이터베이스 MVP 범위는 `rootPage`, `header`, `footer`, `head`로 제한한다.
 - 페이지는 실용적으로 가능한 범위에서 Notion에 가깝게 렌더링한다.
 - 사용자의 k3s 클러스터에 배포한다.
 - 첫 버전에 k3s 배포용 Helm chart를 포함한다.
