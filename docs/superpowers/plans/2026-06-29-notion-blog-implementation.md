@@ -676,7 +676,7 @@ if (process.env.NODE_ENV !== "production") {
 Run:
 
 ```bash
-pnpm db:generate
+DATABASE_URL="postgresql://notion_blog:notion_blog@localhost:5432/notion_blog?schema=public" pnpm db:generate
 pnpm test:run tests/server/prisma-schema.test.ts
 pnpm typecheck
 ```
