@@ -5,7 +5,7 @@ import type { BlogRepository } from "@/server/repositories";
 
 interface SettingsServiceDependencies {
   notion: NotionGateway;
-  repository: Pick<BlogRepository, "upsertRefreshTarget" | "upsertRootRoute" | "upsertSettingsSnapshot">;
+  repository: Pick<BlogRepository, "upsertRefreshTarget" | "upsertSettingsSnapshot">;
   settingsDatabaseId: string;
   now?: () => Date;
 }
@@ -30,7 +30,6 @@ export function createSettingsService({
         headJson: parsed.head
       });
 
-      await repository.upsertRootRoute(parsed.rootPageId);
       await repository.upsertRefreshTarget({
         targetKind: "settings",
         targetId: settingsDatabaseId,

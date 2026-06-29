@@ -18,6 +18,12 @@ export interface UpsertSettingsSnapshotInput {
   headJson: SiteHeadSettings;
 }
 
+export interface MarkPagePrivateInput {
+  pageId: string;
+  syncedAt: Date;
+  nextRefreshAt: Date;
+}
+
 export interface RefreshTargetInput {
   targetKind: "settings" | "page";
   targetId: string;
@@ -52,12 +58,11 @@ export interface RefreshTargetRecord {
 
 export interface BlogRepository {
   upsertPageSnapshot(input: UpsertPageSnapshotInput): Promise<void>;
-  markPagePrivate(pageId: string): Promise<void>;
+  markPagePrivate(input: MarkPagePrivateInput): Promise<void>;
   resolveRoute(slug: string): Promise<RouteResolution>;
   upsertRefreshTarget(target: RefreshTargetInput): Promise<void>;
   claimDueRefreshTargets(now: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
   upsertSettingsSnapshot(input: UpsertSettingsSnapshotInput): Promise<void>;
-  upsertRootRoute(rootPageId: string): Promise<void>;
 }
 
 type PrismaTransactionLike = {
@@ -87,6 +92,7 @@ type PrismaTransactionLike = {
     updateMany?: (args: unknown) => Promise<{ count: number }>;
   };
   siteSettings: {
+    findUnique?: (args: unknown) => Promise<any>;
     upsert: (args: unknown) => Promise<unknown>;
   };
 };
@@ -133,6 +139,10 @@ async function slugExists(tx: PrismaTransactionLike, slug: string, pageId: strin
 
   const alias = await tx.slugAlias.findUnique?.({ where: { slug } });
   return Boolean(alias && alias.pageId !== pageId);
+}
+
+function fallbackRootSlug(pageId: string): string {
+  return `/${createSlug("", pageId)}`;
 }
 
 async function ensureCanonicalSlug(tx: PrismaTransactionLike, pageId: string, title: string): Promise<string> {
@@ -260,33 +270,58 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
       });
     },
 
-    async markPagePrivate(pageId) {
+    async markPagePrivate(input) {
       await withTransaction(prisma, async (tx) => {
-        const now = new Date();
-
         await tx.notionPage.upsert({
-          where: { pageId },
+          where: { pageId: input.pageId },
           update: {
             publicUrl: null,
-            lastSyncedAt: now
+            lastSyncedAt: input.syncedAt
           },
           create: {
-            pageId,
+            pageId: input.pageId,
             title: "",
             notionUrl: "",
             publicUrl: null,
-            lastSyncedAt: now
+            lastSyncedAt: input.syncedAt
           }
         });
 
         await tx.pageRoute.updateMany?.({
-          where: { pageId },
+          where: { pageId: input.pageId },
           data: { isActive: false }
         });
 
         await tx.slugAlias.updateMany?.({
-          where: { pageId, status: SlugAliasStatus.ACTIVE },
+          where: { pageId: input.pageId, status: SlugAliasStatus.ACTIVE },
           data: { status: SlugAliasStatus.INACTIVE }
+        });
+
+        await tx.refreshTarget.upsert({
+          where: {
+            targetKind_targetId: {
+              targetKind: RefreshTargetKind.PAGE,
+              targetId: input.pageId
+            }
+          },
+          update: {
+            nextRefreshAt: input.nextRefreshAt,
+            lastSyncedAt: input.syncedAt,
+            failureCount: 0,
+            lastError: null,
+            lockedAt: null,
+            lockedBy: null
+          },
+          create: {
+            targetKind: RefreshTargetKind.PAGE,
+            targetId: input.pageId,
+            nextRefreshAt: input.nextRefreshAt,
+            lastSyncedAt: input.syncedAt,
+            failureCount: 0,
+            lastError: null,
+            lockedAt: null,
+            lockedBy: null
+          }
         });
       });
     },
@@ -395,38 +430,84 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
     },
 
     async upsertSettingsSnapshot(input) {
-      await prisma.siteSettings.upsert({
-        where: { settingsDatabaseId: input.settingsDatabaseId },
-        update: {
-          rootPageId: input.rootPageId,
-          headerPageId: input.headerPageId ?? null,
-          footerPageId: input.footerPageId ?? null,
-          headJson: input.headJson,
-          lastSyncedAt: new Date()
-        },
-        create: {
-          settingsDatabaseId: input.settingsDatabaseId,
-          rootPageId: input.rootPageId,
-          headerPageId: input.headerPageId ?? null,
-          footerPageId: input.footerPageId ?? null,
-          headJson: input.headJson,
-          lastSyncedAt: new Date()
-        }
-      });
-    },
+      await withTransaction(prisma, async (tx) => {
+        const syncedAt = new Date();
 
-    async upsertRootRoute(rootPageId) {
-      await prisma.pageRoute.upsert({
-        where: { pageId: rootPageId },
-        update: {
-          canonicalSlug: "/",
-          isActive: true
-        },
-        create: {
-          pageId: rootPageId,
-          canonicalSlug: "/",
-          isActive: true
+        await tx.notionPage.upsert({
+          where: { pageId: input.rootPageId },
+          update: {},
+          create: {
+            pageId: input.rootPageId,
+            title: "",
+            notionUrl: "",
+            publicUrl: null
+          }
+        });
+
+        const currentRootRoute = await tx.pageRoute.findUnique?.({
+          where: { canonicalSlug: "/" }
+        });
+        if (currentRootRoute && currentRootRoute.pageId !== input.rootPageId) {
+          await tx.pageRoute.updateMany?.({
+            where: {
+              pageId: currentRootRoute.pageId,
+              canonicalSlug: "/"
+            },
+            data: {
+              canonicalSlug: fallbackRootSlug(currentRootRoute.pageId)
+            }
+          });
         }
+
+        const targetRootRoute = await tx.pageRoute.findUnique?.({
+          where: { pageId: input.rootPageId }
+        });
+        if (targetRootRoute?.canonicalSlug && targetRootRoute.canonicalSlug !== "/") {
+          await tx.slugAlias.upsert?.({
+            where: { slug: targetRootRoute.canonicalSlug },
+            update: {
+              pageId: input.rootPageId,
+              status: SlugAliasStatus.ACTIVE
+            },
+            create: {
+              pageId: input.rootPageId,
+              slug: targetRootRoute.canonicalSlug,
+              status: SlugAliasStatus.ACTIVE
+            }
+          });
+        }
+
+        await tx.pageRoute.upsert({
+          where: { pageId: input.rootPageId },
+          update: {
+            canonicalSlug: "/",
+            isActive: true
+          },
+          create: {
+            pageId: input.rootPageId,
+            canonicalSlug: "/",
+            isActive: true
+          }
+        });
+
+        await tx.siteSettings.upsert({
+          where: { settingsDatabaseId: input.settingsDatabaseId },
+          update: {
+            rootPageId: input.rootPageId,
+            headerPageId: input.headerPageId ?? null,
+            footerPageId: input.footerPageId ?? null,
+            headJson: input.headJson,
+            lastSyncedAt: syncedAt
+          },
+          create: {
+            settingsDatabaseId: input.settingsDatabaseId,
+            rootPageId: input.rootPageId,
+            headerPageId: input.headerPageId ?? null,
+            footerPageId: input.footerPageId ?? null,
+            headJson: input.headJson,
+            lastSyncedAt: syncedAt
+          }
+        });
       });
     }
   };

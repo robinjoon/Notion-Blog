@@ -17,8 +17,7 @@ describe("settings service", () => {
     };
     const repository = {
       upsertSettingsSnapshot: vi.fn().mockResolvedValue(undefined),
-      upsertRefreshTarget: vi.fn().mockResolvedValue(undefined),
-      upsertRootRoute: vi.fn().mockResolvedValue(undefined)
+      upsertRefreshTarget: vi.fn().mockResolvedValue(undefined)
     };
 
     const service = createSettingsService({
@@ -47,6 +46,5 @@ describe("settings service", () => {
         defaultTitle: "Blog"
       }
     });
-    expect(repository.upsertRootRoute).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
   });
 });

@@ -8,7 +8,7 @@ interface SyncServiceDependencies {
     Partial<
       Pick<
         BlogRepository,
-        "claimDueRefreshTargets" | "upsertRefreshTarget" | "upsertRootRoute" | "upsertSettingsSnapshot"
+        "claimDueRefreshTargets" | "upsertRefreshTarget" | "upsertSettingsSnapshot"
       >
     >;
   notion: NotionGateway;
@@ -22,10 +22,10 @@ export function createSyncService({
   settingsDatabaseId,
   now
 }: SyncServiceDependencies) {
-  const pageService = createPageService({ repository, notion });
+  const pageService = createPageService({ repository, notion, now });
   const settingsService = settingsDatabaseId
     ? createSettingsService({
-        repository: repository as Pick<BlogRepository, "upsertRefreshTarget" | "upsertRootRoute" | "upsertSettingsSnapshot">,
+        repository: repository as Pick<BlogRepository, "upsertRefreshTarget" | "upsertSettingsSnapshot">,
         notion,
         settingsDatabaseId,
         now

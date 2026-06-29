@@ -13,7 +13,7 @@ describe("blog repository", () => {
           status: "ACTIVE",
           page: {
             route: {
-              pageId: "page-a",
+              pageId: "0123456789abcdef0123456789abcdef",
               canonicalSlug: "/current-slug",
               isActive: true
             }
@@ -34,7 +34,7 @@ describe("blog repository", () => {
     const prisma = {
       pageRoute: {
         findUnique: vi.fn().mockResolvedValue({
-          pageId: "root-page",
+          pageId: "0123456789abcdef0123456789abcdef",
           canonicalSlug: "/",
           isActive: true
         })
@@ -48,7 +48,7 @@ describe("blog repository", () => {
 
     await expect(repository.resolveRoute("/")).resolves.toEqual({
       kind: "page",
-      pageId: "root-page",
+      pageId: "0123456789abcdef0123456789abcdef",
       slug: "/"
     });
   });
@@ -123,5 +123,110 @@ describe("blog repository", () => {
         lockedBy: "worker-a"
       }
     ]);
+  });
+
+  it("creates a root-page placeholder before assigning the first root route", async () => {
+    const notionPageUpsert = vi.fn().mockResolvedValue(undefined);
+    const siteSettingsUpsert = vi.fn().mockResolvedValue(undefined);
+    const pageRouteFindUnique = vi.fn().mockResolvedValue(null);
+    const pageRouteUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const pageRouteUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      notionPage: { upsert: notionPageUpsert },
+      pageRoute: {
+        findUnique: pageRouteFindUnique,
+        updateMany: pageRouteUpdateMany,
+        upsert: pageRouteUpsert
+      },
+      slugAlias: {},
+      pageSnapshot: { upsert: vi.fn() },
+      refreshTarget: { upsert: vi.fn() },
+      siteSettings: { upsert: siteSettingsUpsert }
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (work: (inner: typeof tx) => Promise<void>) => work(tx))
+    };
+
+    const repository = createBlogRepository(prisma as never);
+
+    await repository.upsertSettingsSnapshot({
+      settingsDatabaseId: "settings-db",
+      rootPageId: "0123456789abcdef0123456789abcdef",
+      headJson: {}
+    });
+
+    expect(notionPageUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { pageId: "0123456789abcdef0123456789abcdef" }
+      })
+    );
+    expect(pageRouteUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { pageId: "0123456789abcdef0123456789abcdef" },
+        create: expect.objectContaining({
+          pageId: "0123456789abcdef0123456789abcdef",
+          canonicalSlug: "/"
+        })
+      })
+    );
+    expect(pageRouteUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("moves the root route from the old root page to the new root page atomically", async () => {
+    const notionPageUpsert = vi.fn().mockResolvedValue(undefined);
+    const siteSettingsUpsert = vi.fn().mockResolvedValue(undefined);
+    const pageRouteFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", canonicalSlug: "/" })
+      .mockResolvedValueOnce({ pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", canonicalSlug: "/new-root" });
+    const pageRouteUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const pageRouteUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      notionPage: { upsert: notionPageUpsert },
+      pageRoute: {
+        findUnique: pageRouteFindUnique,
+        updateMany: pageRouteUpdateMany,
+        upsert: pageRouteUpsert
+      },
+      slugAlias: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      pageSnapshot: { upsert: vi.fn() },
+      refreshTarget: { upsert: vi.fn() },
+      siteSettings: {
+        upsert: siteSettingsUpsert
+      }
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (work: (inner: typeof tx) => Promise<void>) => work(tx))
+    };
+
+    const repository = createBlogRepository(prisma as never);
+
+    await repository.upsertSettingsSnapshot({
+      settingsDatabaseId: "settings-db",
+      rootPageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      headJson: {}
+    });
+
+    expect(pageRouteUpdateMany).toHaveBeenCalledWith({
+      where: {
+        pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        canonicalSlug: "/"
+      },
+      data: {
+        canonicalSlug: "/page-aaaaaaaa"
+      }
+    });
+    expect(pageRouteUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        update: expect.objectContaining({
+          canonicalSlug: "/"
+        })
+      })
+    );
   });
 });
