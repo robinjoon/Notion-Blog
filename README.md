@@ -24,7 +24,7 @@ Notion-Blog renders a Notion root page as a self-hosted public blog.
 
 `NOTION_TOKEN`은 설정 데이터베이스와 페이지 수집에 모두 사용합니다. `SETTINGS_DATABASE_ID`는 사이트 설정만 담는 비공개 Notion 데이터베이스 ID이며, 루트 페이지 선택도 이 데이터베이스의 `rootPage` row에서 결정됩니다.
 
-기본 예시는 [.env.example](/Users/imsubin/Documents/Notion-Blog/.env.example) 에 있습니다.
+기본 예시는 [.env.example](.env.example) 에 있습니다.
 
 ```bash
 DATABASE_URL="postgresql://notion_blog:notion_blog@localhost:5432/notion_blog?schema=public"
@@ -36,6 +36,7 @@ SETTINGS_DATABASE_ID="00000000000000000000000000000000"
 
 - `pnpm install`
 - `pnpm db:generate`
+- `pnpm db:migrate`
 - `pnpm dev`
 - `pnpm worker`
 - `pnpm test:run`
@@ -47,6 +48,7 @@ SETTINGS_DATABASE_ID="00000000000000000000000000000000"
 ```bash
 pnpm install
 pnpm db:generate
+pnpm db:migrate
 pnpm dev
 ```
 
@@ -71,7 +73,7 @@ It expects an existing Kubernetes Secret referenced by `env.existingSecret`.
 
 현재 chart는 web Deployment, worker Deployment, migration Job, Service, 선택적 Ingress를 렌더링합니다. 기본 Secret 이름은 `notion-blog-env`이며, 이 Secret 안에 최소한 `DATABASE_URL`, `NOTION_TOKEN`, `SETTINGS_DATABASE_ID`가 있어야 합니다.
 
-Docker 이미지는 루트의 [Dockerfile](/Users/imsubin/Documents/Notion-Blog/Dockerfile) 로 빌드합니다.
+Docker 이미지는 루트의 [Dockerfile](Dockerfile) 로 빌드합니다.
 
 ```bash
 docker build -t notion-blog:local .
@@ -96,4 +98,4 @@ helm upgrade --install notion-blog deploy/helm/notion-blog \
 
 Ingress가 필요하면 `deploy/helm/notion-blog/values.yaml`의 `ingress.enabled`, `ingress.hosts`, `ingress.tls`를 환경에 맞게 override해서 배포하면 됩니다.
 
-설정 데이터베이스 스키마와 각 row 의미는 [docs/notion-settings-schema.md](/Users/imsubin/Documents/Notion-Blog/docs/notion-settings-schema.md) 에 정리되어 있습니다.
+설정 데이터베이스 스키마와 각 row 의미는 [docs/notion-settings-schema.md](docs/notion-settings-schema.md) 에 정리되어 있습니다.

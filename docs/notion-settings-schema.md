@@ -2,13 +2,13 @@
 
 `SETTINGS_DATABASE_ID`는 `Notion-Blog Settings` 용도의 비공개 Notion 데이터베이스를 가리킵니다. 이 데이터베이스는 일반 블로그 콘텐츠가 아니라 사이트 설정 소스이며, 현재 구현은 Notion integration으로 `client.dataSources.query({ data_source_id: SETTINGS_DATABASE_ID })`를 호출해 row를 읽습니다.
 
-일반 콘텐츠 페이지는 Notion public share와 `public_url`을 기준으로 공개 여부가 결정되지만, settings 데이터베이스 자체는 비공개여야 합니다. 특히 `header`와 `footer`는 설정 조각으로만 읽히며 블로그 라우트로 노출되지 않습니다.
+일반 콘텐츠 페이지는 Notion public share와 `public_url`을 기준으로 공개 여부가 결정되지만, settings 데이터베이스 자체는 비공개여야 합니다. `header`와 `footer`는 현재 MVP에서 렌더링되지 않고, page ID를 파싱해 저장하고 refresh target으로 등록하는 예약 설정으로만 동작합니다.
 
 ## Database Properties
 
-MVP는 아래 5개 속성을 전제로 `SettingsRow` 형태로 파싱합니다.
+MVP는 아래 5개 속성을 전제로 `SettingsRow` 형태로 파싱합니다. 이 표는 "현재 구현이 기대하는 normalized row contract"를 설명합니다. 즉, 현재 코드는 Notion의 임의 raw property payload를 견고하게 해석하는 일반-purpose adapter가 아니라, query 결과를 `SettingsRow[]`로 간주하고 처리하는 MVP 가정 위에 서 있습니다.
 
-| Notion property | Required | Parsed field | Type | Notes |
+| Assumed property | Required | Parsed field | Type | Notes |
 | --- | --- | --- | --- | --- |
 | `Key` | yes | `key` | title | 고정 row key. `rootPage`, `header`, `footer`, `head` 중 하나를 사용합니다. |
 | `Kind` | yes | `kind` | select | `page` \| `blocks` \| `head` |
@@ -16,7 +16,7 @@ MVP는 아래 5개 속성을 전제로 `SettingsRow` 형태로 파싱합니다.
 | `Page` | yes for page rows | `page` | url or rich text | Notion page URL 또는 page ID/reference |
 | `Data` | yes for head row | `data` | rich text or text | `head` row의 JSON 문자열 |
 
-코드 기준 row shape:
+코드 기준의 required row shape:
 
 ```ts
 interface SettingsRow {
@@ -44,15 +44,15 @@ interface SettingsRow {
 
 - 선택 row입니다.
 - `Kind`는 `blocks`를 사용합니다.
-- `Page`에는 전역 header 블록을 읽어올 Notion 페이지 reference를 넣습니다.
-- 이 페이지는 설정 조각으로만 사용되며, 일반 콘텐츠처럼 public share를 요구하지 않습니다.
+- `Page`에는 향후 전역 header 조각으로 쓸 수 있는 Notion 페이지 reference를 넣습니다.
+- 현재 MVP는 이 값을 파싱하고 저장하며 refresh target으로 등록하지만, layout/page에서 실제로 렌더링하지는 않습니다.
 
 ### `footer`
 
 - 선택 row입니다.
 - `Kind`는 `blocks`를 사용합니다.
-- `Page`에는 전역 footer 블록을 읽어올 Notion 페이지 reference를 넣습니다.
-- 이 페이지도 설정 조각 전용이며 블로그 라우트로 노출되지 않습니다.
+- `Page`에는 향후 전역 footer 조각으로 쓸 수 있는 Notion 페이지 reference를 넣습니다.
+- 현재 MVP는 이 값을 파싱하고 저장하며 refresh target으로 등록하지만, layout/page에서 실제로 렌더링하지는 않습니다.
 
 ### `head`
 
@@ -124,4 +124,5 @@ interface SiteHeadSettings {
 - `SETTINGS_DATABASE_ID`가 유일한 settings 환경 식별자입니다.
 - root page 선택은 별도 env var가 아니라 settings 데이터베이스의 `rootPage` row에서 읽습니다.
 - settings sync가 끝나면 앱은 `rootPage`, `header`, `footer`가 가리키는 page ID를 refresh target으로 등록합니다.
+- `header`와 `footer`는 현재 MVP에서 rendered fragment가 아니라, parsed/stored/refreshed only 상태의 예약 설정입니다.
 - 일반 콘텐츠 페이지는 Notion `public_url`이 있을 때만 공개 서빙 대상이 됩니다.
