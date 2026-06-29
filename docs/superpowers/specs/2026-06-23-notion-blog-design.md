@@ -27,7 +27,7 @@ Notion 페이지 그래프를 공개 블로그로 변환하는 셀프 호스팅 
 - 과거 slug 별칭을 현재 대표 slug로 직접 리다이렉트.
 - 주요 블록 타입에 대한 Notion 유사 렌더링.
 - 웹 프로세스와 동기화 worker 프로세스 분리.
-- Docker 및 k3s 배포 전제.
+- Docker image 및 k3s 배포용 Helm chart.
 
 ### MVP에서 제외
 
@@ -68,7 +68,18 @@ PostgreSQL은 단순 임시 캐시가 아니라 퍼블리싱 상태 저장소다
 - TypeScript: 웹, 렌더러, 동기화 로직, Notion 어댑터 간 공유 타입.
 - Prisma: PostgreSQL 스키마 및 migration 관리.
 - PostgreSQL: 영속 캐시, 라우트 상태, slug 별칭, 스냅샷, 동기화 메타데이터 저장.
-- Docker image: 사용자의 개인 k3s 클러스터에 배포.
+- Docker image: 애플리케이션 실행 단위.
+- Helm chart: 사용자의 개인 k3s 클러스터 배포 단위.
+
+## 저장소 구조
+
+앱 소스코드와 배포 리소스는 명확히 분리한다.
+
+- 애플리케이션 소스, 렌더러, worker, Prisma schema는 일반 앱 소스 경로에 둔다.
+- k3s 배포를 위한 Helm chart는 `deploy/helm/notion-blog`에 둔다.
+- Helm chart 경로 안에는 앱 런타임 소스코드를 두지 않는다.
+- 앱 코드에서는 Helm chart 내부 파일을 import하지 않는다.
+- 배포 환경별 값은 chart template이 아니라 values 파일 또는 Kubernetes Secret/외부 secret 관리로 주입한다.
 
 ## Notion 모델
 
@@ -322,19 +333,36 @@ worker는 여러 worker replica가 같은 대상을 동시에 처리하지 않�
 
 ## 배포
 
-k3s 배포는 다음 구성을 사용한다.
+k3s 배포는 `deploy/helm/notion-blog` Helm chart로 관리한다. chart는 애플리케이션 소스코드와 분리된 배포 리소스이며, 첫 버전 범위에 포함된다.
+
+Helm chart는 다음 리소스를 템플릿으로 제공한다.
 
 - Next.js server를 실행하는 web Deployment 1개.
 - sync worker를 실행하는 worker Deployment 1개.
 - Prisma migration을 위한 migration Job 1개.
 - 웹 앱을 위한 Service와 Ingress.
-- Kubernetes Secret:
+- `env.existingSecret`로 참조되는 Kubernetes Secret. 이 Secret은 다음 환경 변수를 제공한다.
   - `DATABASE_URL`
   - `NOTION_TOKEN`
   - `ROOT_PAGE_ID`
   - `SETTINGS_DATABASE_ID`
 - 웹 앱 readiness probe와 liveness probe.
 - 진행 중인 sync job을 마치거나 lock을 해제할 수 있는 worker graceful shutdown.
+
+초기 values는 다음 설정을 노출한다.
+
+- `image.repository`
+- `image.tag`
+- `image.pullPolicy`
+- `web.replicas`
+- `worker.replicas`
+- `ingress.enabled`
+- `ingress.className`
+- `ingress.hosts`
+- `resources`
+- `env.existingSecret`
+
+기존 PostgreSQL은 chart가 직접 생성하지 않는다. 데이터베이스 접속 정보는 `DATABASE_URL`을 가진 Kubernetes Secret 또는 외부 secret 관리 도구를 통해 주입한다.
 
 ## 테스트 전략
 
@@ -353,6 +381,7 @@ k3s 배포는 다음 구성을 사용한다.
 - route lookup 및 redirect 동작.
 - mock Notion API 응답을 사용한 page metadata 및 snapshot worker 처리.
 - public/private 전환 동작.
+- Helm chart template 렌더링.
 
 엔드투엔드 확인:
 
@@ -360,6 +389,7 @@ k3s 배포는 다음 구성을 사용한다.
 - slug 별칭이 현재 대표 route로 직접 리다이렉트된다.
 - `public_url`이 없는 페이지는 서빙되지 않는다.
 - custom CSS와 전역 설정이 적용된다.
+- Helm chart로 web, worker, migration Job, Service, Ingress가 생성된다.
 
 ## 열린 확장 지점
 
@@ -388,4 +418,6 @@ k3s 배포는 다음 구성을 사용한다.
 - 설정 데이터베이스 MVP 범위는 전역 설정으로 제한한다.
 - 페이지는 실용적으로 가능한 범위에서 Notion에 가깝게 렌더링한다.
 - 사용자의 k3s 클러스터에 배포한다.
+- 첫 버전에 k3s 배포용 Helm chart를 포함한다.
+- Helm chart는 앱 소스와 분리된 `deploy/helm/notion-blog` 경로에 둔다.
 - PostgreSQL, Next.js, TypeScript, Prisma, 별도 sync worker를 사용한다.
