@@ -229,4 +229,66 @@ describe("blog repository", () => {
       })
     );
   });
+
+  it("reschedules the public page refresh target after snapshot persistence", async () => {
+    const refreshTargetUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      notionPage: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      pageRoute: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      slugAlias: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null)
+      },
+      pageSnapshot: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      refreshTarget: {
+        upsert: refreshTargetUpsert
+      },
+      siteSettings: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (work: (inner: typeof tx) => Promise<void>) => work(tx))
+    };
+    const repository = createBlogRepository(prisma as never);
+    const syncedAt = new Date("2026-06-30T00:00:00.000Z");
+    const nextRefreshAt = new Date("2026-06-30T00:15:00.000Z");
+
+    await repository.upsertPageSnapshot({
+      pageId: "0123456789abcdef0123456789abcdef",
+      title: "Page A",
+      notionUrl: "https://www.notion.so/page-a",
+      publicUrl: "https://site.notion.site/page-a",
+      lastEditedTime: "2026-06-30T00:00:00.000Z",
+      blocks: [],
+      syncedAt,
+      nextRefreshAt
+    });
+
+    expect(refreshTargetUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          nextRefreshAt,
+          lastSyncedAt: syncedAt,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: null,
+          lockedBy: null
+        }),
+        create: expect.objectContaining({
+          nextRefreshAt,
+          lastSyncedAt: syncedAt,
+          failureCount: 0
+        })
+      })
+    );
+  });
 });

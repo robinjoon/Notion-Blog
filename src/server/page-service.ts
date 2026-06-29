@@ -34,8 +34,21 @@ export function createPageService({ notion, repository, now = () => new Date() }
         return;
       }
 
+      const syncedAt = now();
       const snapshot = await collectPageSnapshot(notion, pageId, metadata);
-      await repository.upsertPageSnapshot(snapshot);
+      await repository.upsertPageSnapshot({
+        ...snapshot,
+        syncedAt,
+        nextRefreshAt: simpleRefreshPolicy(
+          {
+            targetKind: "page",
+            targetId: metadata.pageId,
+            failureCount: 0,
+            lastSyncedAt: syncedAt
+          },
+          syncedAt
+        )
+      });
     }
   };
 }

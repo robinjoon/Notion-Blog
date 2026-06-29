@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createSyncService } from "@/worker/sync-service";
 
 describe("sync service", () => {
-  it("stores a snapshot for the normalized notion page id", async () => {
+  it("stores a snapshot for the normalized notion page id and reschedules refresh", async () => {
+    const now = new Date("2026-06-30T00:00:00.000Z");
     const repository = {
       upsertPageSnapshot: vi.fn().mockResolvedValue(undefined),
       markPagePrivate: vi.fn().mockResolvedValue(undefined)
@@ -24,12 +25,16 @@ describe("sync service", () => {
       querySettingsDatabase: vi.fn()
     };
 
-    const service = createSyncService({ repository, notion: gateway });
+    const service = createSyncService({ repository, notion: gateway, now: () => now });
 
     await service.syncPage("01234567-89ab-cdef-0123-456789abcdef");
 
     expect(repository.upsertPageSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ pageId: "0123456789abcdef0123456789abcdef" })
+      expect.objectContaining({
+        pageId: "0123456789abcdef0123456789abcdef",
+        syncedAt: now,
+        nextRefreshAt: new Date("2026-06-30T00:15:00.000Z")
+      })
     );
     expect(repository.markPagePrivate).not.toHaveBeenCalled();
   });

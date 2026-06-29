@@ -8,7 +8,10 @@ export type RouteResolution =
   | { kind: "redirect"; destination: string }
   | { kind: "not-found" };
 
-export interface UpsertPageSnapshotInput extends PageSnapshot {}
+export interface UpsertPageSnapshotInput extends PageSnapshot {
+  syncedAt: Date;
+  nextRefreshAt: Date;
+}
 
 export interface UpsertSettingsSnapshotInput {
   settingsDatabaseId: string;
@@ -198,7 +201,6 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
       await withTransaction(prisma, async (tx) => {
         const canonicalSlug = await ensureCanonicalSlug(tx, input.pageId, input.title);
         const notionLastEditedTime = new Date(input.lastEditedTime);
-        const now = new Date();
 
         await tx.notionPage.upsert({
           where: { pageId: input.pageId },
@@ -207,7 +209,7 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
             notionUrl: input.notionUrl,
             publicUrl: input.publicUrl,
             lastEditedTime: notionLastEditedTime,
-            lastSyncedAt: now
+            lastSyncedAt: input.syncedAt
           },
           create: {
             pageId: input.pageId,
@@ -215,7 +217,7 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
             notionUrl: input.notionUrl,
             publicUrl: input.publicUrl,
             lastEditedTime: notionLastEditedTime,
-            lastSyncedAt: now
+            lastSyncedAt: input.syncedAt
           }
         });
 
@@ -253,7 +255,8 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
             }
           },
           update: {
-            lastSyncedAt: now,
+            nextRefreshAt: input.nextRefreshAt,
+            lastSyncedAt: input.syncedAt,
             failureCount: 0,
             lastError: null,
             lockedAt: null,
@@ -262,9 +265,12 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
           create: {
             targetKind: RefreshTargetKind.PAGE,
             targetId: input.pageId,
-            nextRefreshAt: now,
-            lastSyncedAt: now,
-            failureCount: 0
+            nextRefreshAt: input.nextRefreshAt,
+            lastSyncedAt: input.syncedAt,
+            failureCount: 0,
+            lastError: null,
+            lockedAt: null,
+            lockedBy: null
           }
         });
       });
