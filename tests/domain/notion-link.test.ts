@@ -8,6 +8,12 @@ describe("Notion link parser", () => {
     });
   });
 
+  it("extracts page id from notion.site URLs", () => {
+    expect(parseNotionPageReference("https://workspace.notion.site/My-Page-0123456789abcdef0123456789abcdef")).toEqual({
+      pageId: "0123456789abcdef0123456789abcdef"
+    });
+  });
+
   it("extracts page id from a raw id", () => {
     expect(parseNotionPageReference("0123456789abcdef0123456789abcdef")).toEqual({
       pageId: "0123456789abcdef0123456789abcdef"

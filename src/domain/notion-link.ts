@@ -1,4 +1,4 @@
-const NOTION_HOST_SUFFIX = "notion.so";
+const NOTION_HOST_SUFFIXES = ["notion.so", "notion.site"];
 const NOTION_ID_PATTERN = /([0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i;
 
 function normalizePageId(pageId: string): string | null {
@@ -20,7 +20,7 @@ export function parseNotionPageReference(input: string): { pageId: string } | nu
     return null;
   }
 
-  if (!(url.hostname === NOTION_HOST_SUFFIX || url.hostname.endsWith(`.${NOTION_HOST_SUFFIX}`))) {
+  if (!NOTION_HOST_SUFFIXES.some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`))) {
     return null;
   }
 

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("Prisma schema", () => {
@@ -47,5 +47,27 @@ describe("Prisma schema", () => {
   it("keeps canonical slugs and aliases unique", () => {
     expect(schema).toContain("canonicalSlug String     @unique");
     expect(schema).toContain("slug      String          @unique");
+  });
+
+  it("checks in a baseline migration for the publishing schema", () => {
+    const migrationDirectories = readdirSync("prisma/migrations", { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    expect(migrationDirectories.length).toBeGreaterThan(0);
+
+    const migrationSql = readFileSync(`prisma/migrations/${migrationDirectories.at(-1)}/migration.sql`, "utf8");
+
+    expect(migrationSql).toContain('CREATE TYPE "SlugAliasStatus" AS ENUM');
+    expect(migrationSql).toContain('CREATE TYPE "RefreshTargetKind" AS ENUM');
+    expect(migrationSql).toContain('CREATE TYPE "SyncRunStatus" AS ENUM');
+    expect(migrationSql).toContain('CREATE TABLE "SiteSettings"');
+    expect(migrationSql).toContain('CREATE TABLE "NotionPage"');
+    expect(migrationSql).toContain('CREATE TABLE "PageRoute"');
+    expect(migrationSql).toContain('CREATE TABLE "SlugAlias"');
+    expect(migrationSql).toContain('CREATE TABLE "PageSnapshot"');
+    expect(migrationSql).toContain('CREATE TABLE "RefreshTarget"');
+    expect(migrationSql).toContain('CREATE TABLE "SyncRun"');
   });
 });

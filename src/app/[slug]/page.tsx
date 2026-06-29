@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { NotionPage } from "@/components/notion/NotionPage";
 import { getPageService } from "@/server/page-service";
 
@@ -11,7 +11,7 @@ export default async function BlogPage({ params }: { params: Promise<{ slug: str
   const result = await pageService.getPageBySlug(slug);
 
   if (result.kind === "redirect") {
-    redirect(result.destination);
+    permanentRedirect(result.destination);
   }
 
   if (result.kind !== "page") {

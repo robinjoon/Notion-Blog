@@ -132,6 +132,7 @@ export async function startWorker(): Promise<void> {
     notion: createNotionGateway(notionToken),
     settingsDatabaseId
   });
+  await syncService.ensureSettingsRefreshTarget();
   const pollIntervalMs = parsePollIntervalMs(process.env.WORKER_POLL_INTERVAL_MS);
   const workerId = process.env.WORKER_ID ?? randomUUID();
   const shutdown = createShutdownController();

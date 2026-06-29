@@ -101,8 +101,7 @@ describe("blog repository", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           targetKind: "SETTINGS",
-          targetId: "settings-db",
-          lockedAt: null
+          targetId: "settings-db"
         }),
         data: {
           lockedAt: now,
@@ -123,6 +122,132 @@ describe("blog repository", () => {
         lockedBy: "worker-a"
       }
     ]);
+  });
+
+  it("claims stale locked refresh targets but leaves fresh locks alone", async () => {
+    const now = new Date("2026-06-30T00:10:00.000Z");
+    const staleLock = new Date("2026-06-30T00:03:59.000Z");
+    const freshLock = new Date("2026-06-30T00:09:00.000Z");
+    const updateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          targetKind: "SETTINGS",
+          targetId: "stale-settings",
+          nextRefreshAt: new Date("2026-06-30T00:00:00.000Z"),
+          lastSyncedAt: null,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: staleLock,
+          lockedBy: "worker-dead",
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          targetKind: "PAGE",
+          targetId: "fresh-page",
+          nextRefreshAt: new Date("2026-06-30T00:01:00.000Z"),
+          lastSyncedAt: null,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: freshLock,
+          lockedBy: "worker-live",
+          createdAt: now,
+          updatedAt: now
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          targetKind: "SETTINGS",
+          targetId: "stale-settings",
+          nextRefreshAt: new Date("2026-06-30T00:00:00.000Z"),
+          lastSyncedAt: null,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: now,
+          lockedBy: "worker-a",
+          createdAt: now,
+          updatedAt: now
+        }
+      ] satisfies RefreshTargetRecord[]);
+
+    const prisma = {
+      refreshTarget: {
+        findMany,
+        updateMany
+      }
+    };
+
+    const repository = createBlogRepository(prisma as never);
+    const claimed = await repository.claimDueRefreshTargets(now, "worker-a", 10);
+
+    expect(updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          targetKind: "SETTINGS",
+          targetId: "stale-settings"
+        }),
+        data: {
+          lockedAt: now,
+          lockedBy: "worker-a"
+        }
+      })
+    );
+    expect(updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          targetKind: "PAGE",
+          targetId: "fresh-page"
+        })
+      })
+    );
+    expect(claimed).toEqual([
+      expect.objectContaining({
+        targetKind: "settings",
+        targetId: "stale-settings",
+        lockedAt: now,
+        lockedBy: "worker-a"
+      })
+    ]);
+  });
+
+  it("creates a refresh target only when it does not already exist", async () => {
+    const upsert = vi.fn().mockResolvedValue(undefined);
+    const repository = createBlogRepository({
+      refreshTarget: { upsert }
+    } as never);
+
+    await repository.ensureRefreshTarget({
+      targetKind: "settings",
+      targetId: "settings-db",
+      nextRefreshAt: new Date("2026-06-30T00:00:00.000Z")
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        targetKind_targetId: {
+          targetKind: "SETTINGS",
+          targetId: "settings-db"
+        }
+      },
+      update: {},
+      create: {
+        targetKind: "SETTINGS",
+        targetId: "settings-db",
+        nextRefreshAt: new Date("2026-06-30T00:00:00.000Z"),
+        lastSyncedAt: null,
+        failureCount: 0,
+        lastError: null,
+        lockedAt: null,
+        lockedBy: null
+      }
+    });
   });
 
   it("creates a root-page placeholder before assigning the first root route", async () => {

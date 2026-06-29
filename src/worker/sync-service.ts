@@ -9,7 +9,7 @@ interface SyncServiceDependencies {
     Partial<
       Pick<
         BlogRepository,
-        "claimDueRefreshTargets" | "upsertRefreshTarget" | "upsertSettingsSnapshot"
+        "claimDueRefreshTargets" | "ensureRefreshTarget" | "upsertRefreshTarget" | "upsertSettingsSnapshot"
       >
     >;
   notion: NotionGateway;
@@ -20,6 +20,7 @@ interface SyncServiceDependencies {
 export interface SyncService {
   syncPage(pageId: string): Promise<void>;
   syncSettings(): Promise<ParsedSettings>;
+  ensureSettingsRefreshTarget(): Promise<void>;
   claimDueRefreshTargets(nowAt: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
 }
 
@@ -29,13 +30,14 @@ export function createSyncService({
   settingsDatabaseId,
   now
 }: SyncServiceDependencies) {
-  const pageService = createPageService({ repository, notion, now });
+  const currentTime = now ?? (() => new Date());
+  const pageService = createPageService({ repository, notion, now: currentTime });
   const settingsService = settingsDatabaseId
     ? createSettingsService({
         repository: repository as Pick<BlogRepository, "upsertRefreshTarget" | "upsertSettingsSnapshot">,
         notion,
         settingsDatabaseId,
-        now
+        now: currentTime
       })
     : null;
 
@@ -47,6 +49,21 @@ export function createSyncService({
       }
 
       return settingsService.syncSettings();
+    },
+    async ensureSettingsRefreshTarget(): Promise<void> {
+      if (!settingsDatabaseId) {
+        throw new Error("settingsDatabaseId is required");
+      }
+
+      if (!repository.ensureRefreshTarget) {
+        throw new Error("ensureRefreshTarget is not configured");
+      }
+
+      await repository.ensureRefreshTarget({
+        targetKind: "settings",
+        targetId: settingsDatabaseId,
+        nextRefreshAt: currentTime()
+      });
     },
     claimDueRefreshTargets(nowAt: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]> {
       if (!repository.claimDueRefreshTargets) {

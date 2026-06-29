@@ -66,6 +66,7 @@ export interface BlogRepository {
   resolveRoute(slug: string): Promise<RouteResolution>;
   getPageContent(pageId: string): Promise<CachedPageContent | null>;
   getSiteSettings(settingsDatabaseId: string): Promise<SiteSettingsSnapshot | null>;
+  ensureRefreshTarget(target: Pick<RefreshTargetInput, "targetKind" | "targetId" | "nextRefreshAt">): Promise<void>;
   upsertRefreshTarget(target: RefreshTargetInput): Promise<void>;
   claimDueRefreshTargets(now: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]>;
   completeRefreshTarget(target: ClaimedRefreshTarget, now: Date): Promise<void>;
@@ -131,6 +132,8 @@ type PrismaLike = PrismaTransactionLike & {
 function normalizeRefreshTargetKind(kind: "settings" | "page") {
   return kind === "settings" ? RefreshTargetKind.SETTINGS : RefreshTargetKind.PAGE;
 }
+
+const REFRESH_TARGET_LOCK_TTL_MS = 5 * 60 * 1000;
 
 function toClaimedRefreshTarget(record: RefreshTargetRecord): ClaimedRefreshTarget {
   return {
@@ -465,11 +468,37 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
       });
     },
 
+    async ensureRefreshTarget(target) {
+      await prisma.refreshTarget.upsert({
+        where: {
+          targetKind_targetId: {
+            targetKind: normalizeRefreshTargetKind(target.targetKind),
+            targetId: target.targetId
+          }
+        },
+        update: {},
+        create: {
+          targetKind: normalizeRefreshTargetKind(target.targetKind),
+          targetId: target.targetId,
+          nextRefreshAt: target.nextRefreshAt,
+          lastSyncedAt: null,
+          failureCount: 0,
+          lastError: null,
+          lockedAt: null,
+          lockedBy: null
+        }
+      });
+    },
+
     async claimDueRefreshTargets(now, workerId, limit) {
+      const staleLockCutoff = new Date(now.getTime() - REFRESH_TARGET_LOCK_TTL_MS);
       const dueTargets = await prisma.refreshTarget.findMany?.({
         where: {
           nextRefreshAt: { lte: now },
-          lockedAt: null
+          OR: [
+            { lockedAt: null },
+            { lockedAt: { lt: staleLockCutoff } }
+          ]
         },
         orderBy: { nextRefreshAt: "asc" },
         take: limit
@@ -482,7 +511,10 @@ export function createBlogRepository(prisma: PrismaLike): BlogRepository {
           where: {
             targetKind: target.targetKind,
             targetId: target.targetId,
-            lockedAt: null
+            OR: [
+              { lockedAt: null },
+              { lockedAt: { lt: staleLockCutoff } }
+            ]
           },
           data: {
             lockedAt: now,

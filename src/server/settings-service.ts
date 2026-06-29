@@ -1,6 +1,7 @@
 import { parseSettingsRows, type ParsedSettings } from "@/domain/settings";
 import { simpleRefreshPolicy } from "@/domain/refresh-policy";
 import type { NotionGateway } from "@/notion/gateway";
+import { mapSettingsRows } from "@/notion/settings-mapper";
 import type { BlogRepository } from "@/server/repositories";
 
 interface SettingsServiceDependencies {
@@ -19,7 +20,7 @@ export function createSettingsService({
   return {
     async syncSettings(): Promise<ParsedSettings> {
       const rows = await notion.querySettingsDatabase(settingsDatabaseId);
-      const parsed = parseSettingsRows(rows as Parameters<typeof parseSettingsRows>[0]);
+      const parsed = parseSettingsRows(mapSettingsRows(rows));
       const syncedAt = now();
 
       await repository.upsertSettingsSnapshot({
