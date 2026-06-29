@@ -1,0 +1,52 @@
+import type { NotionGateway } from "@/notion/gateway";
+import { createPageService } from "@/server/page-service";
+import type { BlogRepository, ClaimedRefreshTarget } from "@/server/repositories";
+import { createSettingsService } from "@/server/settings-service";
+
+interface SyncServiceDependencies {
+  repository: Pick<BlogRepository, "markPagePrivate" | "upsertPageSnapshot"> &
+    Partial<
+      Pick<
+        BlogRepository,
+        "claimDueRefreshTargets" | "upsertRefreshTarget" | "upsertRootRoute" | "upsertSettingsSnapshot"
+      >
+    >;
+  notion: NotionGateway;
+  settingsDatabaseId?: string;
+  now?: () => Date;
+}
+
+export function createSyncService({
+  repository,
+  notion,
+  settingsDatabaseId,
+  now
+}: SyncServiceDependencies) {
+  const pageService = createPageService({ repository, notion });
+  const settingsService = settingsDatabaseId
+    ? createSettingsService({
+        repository: repository as Pick<BlogRepository, "upsertRefreshTarget" | "upsertRootRoute" | "upsertSettingsSnapshot">,
+        notion,
+        settingsDatabaseId,
+        now
+      })
+    : null;
+
+  return {
+    syncPage: pageService.syncPage,
+    async syncSettings() {
+      if (!settingsService) {
+        throw new Error("settingsDatabaseId is required");
+      }
+
+      return settingsService.syncSettings();
+    },
+    claimDueRefreshTargets(nowAt: Date, workerId: string, limit: number): Promise<ClaimedRefreshTarget[]> {
+      if (!repository.claimDueRefreshTargets) {
+        throw new Error("claimDueRefreshTargets is not configured");
+      }
+
+      return repository.claimDueRefreshTargets(nowAt, workerId, limit);
+    }
+  };
+}
