@@ -480,7 +480,7 @@ describe("Prisma schema", () => {
     expect(schema).not.toMatch(/url\s*=\s*env\("DATABASE_URL"\)/);
     expect(config).toContain("defineConfig");
     expect(config).toContain("env(\"DATABASE_URL\")");
-    expect(dbClient).toContain("import { PrismaClient } from \"../generated/prisma/client\"");
+    expect(dbClient).toContain("import { PrismaClient } from \"@/generated/prisma/client\"");
     expect(dbClient).not.toContain("from \"@prisma/client\"");
     expect(dbClient).toContain("import { PrismaPg } from \"@prisma/adapter-pg\"");
     expect(dbClient).toContain("adapter: new PrismaPg({ connectionString })");
@@ -671,7 +671,7 @@ Create `src/server/db.ts`:
 
 ```ts
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../generated/prisma/client";
+import { PrismaClient } from "@/generated/prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
