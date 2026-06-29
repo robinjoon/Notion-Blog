@@ -166,7 +166,9 @@ export interface NotionBlockSnapshot {
 
 **Files:**
 - Create: `package.json`
+- Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.json`
+- Create: `next-env.d.ts`
 - Create: `next.config.ts`
 - Create: `vitest.config.ts`
 - Create: `.env.example`
@@ -190,6 +192,7 @@ Create `package.json`:
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -410,7 +413,7 @@ Expected: both commands exit 0.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add package.json pnpm-lock.yaml tsconfig.json next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
+git add package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json next-env.d.ts next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
 git commit -m "chore: scaffold notion blog app"
 ```
 
