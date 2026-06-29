@@ -25,12 +25,15 @@ enum SyncRunStatus {
 }
 
 model SiteSettings {
-  id           String   @id @default(cuid())
-  settingsJson Json
-  sourceId     String
-  lastSyncedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  settingsDatabaseId String   @unique
+  rootPageId         String
+  headerPageId       String?
+  footerPageId       String?
+  headJson           Json
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model NotionPage {
@@ -38,7 +41,6 @@ model NotionPage {
   title          String
   notionUrl      String
   publicUrl      String?
-  isPublic       Boolean       @default(false)
   lastEditedTime DateTime?
   lastSyncedAt   DateTime?
   createdAt      DateTime      @default(now())
@@ -51,7 +53,6 @@ model NotionPage {
 model PageRoute {
   pageId        String     @id
   canonicalSlug String     @unique
-  isRoot        Boolean    @default(false)
   isActive      Boolean    @default(true)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt

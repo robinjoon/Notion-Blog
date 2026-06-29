@@ -466,12 +466,13 @@ git commit -m "chore: scaffold notion blog app"
 Create `tests/server/prisma-schema.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 describe("Prisma schema", () => {
   const schema = readFileSync("prisma/schema.prisma", "utf8");
   const config = readFileSync("prisma.config.ts", "utf8");
+  const dbClient = readFileSync("src/server/db.ts", "utf8");
 
   it("uses the Prisma 7 generated client", () => {
     expect(schema).toContain("provider = \"prisma-client\"");
@@ -479,6 +480,10 @@ describe("Prisma schema", () => {
     expect(schema).not.toMatch(/url\s*=\s*env\("DATABASE_URL"\)/);
     expect(config).toContain("defineConfig");
     expect(config).toContain("env(\"DATABASE_URL\")");
+    expect(dbClient).toContain("import { PrismaClient } from \"../generated/prisma/client\"");
+    expect(dbClient).not.toContain("from \"@prisma/client\"");
+    expect(dbClient).toContain("import { PrismaPg } from \"@prisma/adapter-pg\"");
+    expect(dbClient).toContain("adapter: new PrismaPg({ connectionString })");
   });
 
   it("defines publishing state models", () => {
@@ -489,6 +494,22 @@ describe("Prisma schema", () => {
     expect(schema).toContain("model PageSnapshot");
     expect(schema).toContain("model RefreshTarget");
     expect(schema).toContain("model SyncRun");
+  });
+
+  it("models settings as an explicit singleton snapshot", () => {
+    expect(schema).toMatch(/settingsDatabaseId\s+String\s+@unique/);
+    expect(schema).toMatch(/rootPageId\s+String/);
+    expect(schema).toMatch(/headerPageId\s+String\?/);
+    expect(schema).toMatch(/footerPageId\s+String\?/);
+    expect(schema).toMatch(/headJson\s+Json/);
+    expect(schema).not.toContain("settingsJson");
+    expect(schema).not.toContain("sourceId");
+  });
+
+  it("derives visibility and root routing instead of storing duplicate booleans", () => {
+    expect(schema).toContain("publicUrl      String?");
+    expect(schema).not.toContain("isPublic");
+    expect(schema).not.toContain("isRoot");
   });
 
   it("keeps canonical slugs and aliases unique", () => {
@@ -562,12 +583,15 @@ enum SyncRunStatus {
 }
 
 model SiteSettings {
-  id           String   @id @default(cuid())
-  settingsJson Json
-  sourceId     String
-  lastSyncedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  settingsDatabaseId String   @unique
+  rootPageId         String
+  headerPageId       String?
+  footerPageId       String?
+  headJson           Json
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model NotionPage {
@@ -575,7 +599,6 @@ model NotionPage {
   title          String
   notionUrl      String
   publicUrl      String?
-  isPublic       Boolean       @default(false)
   lastEditedTime DateTime?
   lastSyncedAt   DateTime?
   createdAt      DateTime      @default(now())
@@ -588,7 +611,6 @@ model NotionPage {
 model PageRoute {
   pageId        String     @id
   canonicalSlug String     @unique
-  isRoot        Boolean    @default(false)
   isActive      Boolean    @default(true)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -649,7 +671,7 @@ Create `src/server/db.ts`:
 
 ```ts
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaClient } from "../generated/prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
