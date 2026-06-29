@@ -3,6 +3,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { getPageService } from "@/server/page-service";
 
+// Site metadata and language settings are DB-backed, so keep layout dynamic.
+export const dynamic = "force-dynamic";
+
 function toMetadataBase(baseUrl?: string): URL | undefined {
   if (!baseUrl) {
     return undefined;
