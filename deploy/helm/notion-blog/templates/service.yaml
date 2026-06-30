@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "notion-blog.fullname" . }}
+  labels:
+    {{- include "notion-blog.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "notion-blog.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP

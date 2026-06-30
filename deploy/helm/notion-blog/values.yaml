@@ -1,0 +1,45 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+env:
+  existingSecret: notion-blog-env
+
+web:
+  replicaCount: 1
+  podAnnotations: {}
+  podLabels: {}
+  containerPort: 3000
+  resources: {}
+
+worker:
+  replicaCount: 1
+  podAnnotations: {}
+  podLabels: {}
+  resources: {}
+
+migration:
+  podAnnotations: {}
+  podLabels: {}
+  backoffLimit: 1
+  resources: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: notion-blog.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

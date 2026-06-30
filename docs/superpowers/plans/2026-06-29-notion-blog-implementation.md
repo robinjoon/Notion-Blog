@@ -166,7 +166,9 @@ export interface NotionBlockSnapshot {
 
 **Files:**
 - Create: `package.json`
+- Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.json`
+- Create: `next-env.d.ts`
 - Create: `next.config.ts`
 - Create: `vitest.config.ts`
 - Create: `.env.example`
@@ -190,6 +192,7 @@ Create `package.json`:
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -232,7 +235,19 @@ Create `package.json`:
 }
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [ ] **Step 2: Create pnpm workspace approvals**
+
+Create `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: true
+```
+
+- [ ] **Step 3: Install dependencies**
 
 Run:
 
@@ -242,7 +257,7 @@ pnpm install
 
 Expected: exit 0 and a new `pnpm-lock.yaml`.
 
-- [ ] **Step 3: Add TypeScript and Next config**
+- [ ] **Step 4: Add TypeScript and Next config**
 
 Create `tsconfig.json`:
 
@@ -250,7 +265,11 @@ Create `tsconfig.json`:
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "ES2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES2022"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
@@ -260,14 +279,29 @@ Create `tsconfig.json`:
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "paths": {
-      "@/*": ["./src/*"]
-    }
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
 ```
 
@@ -304,7 +338,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Add environment example**
+- [ ] **Step 5: Add environment example**
 
 Create `.env.example`:
 
@@ -314,7 +348,7 @@ NOTION_TOKEN="secret_xxx"
 SETTINGS_DATABASE_ID="00000000000000000000000000000000"
 ```
 
-- [ ] **Step 5: Add minimal app shell**
+- [ ] **Step 6: Add minimal app shell**
 
 Create `src/app/layout.tsx`:
 
@@ -376,11 +410,11 @@ body {
 }
 ```
 
-- [ ] **Step 6: Add public directory placeholder**
+- [ ] **Step 7: Add public directory placeholder**
 
 Create `public/.gitkeep` as an empty file so Docker builds can copy the `public` directory consistently.
 
-- [ ] **Step 7: Add scaffold smoke test**
+- [ ] **Step 8: Add scaffold smoke test**
 
 Create `tests/smoke/scaffold.test.ts`:
 
@@ -396,7 +430,7 @@ describe("project scaffold", () => {
 });
 ```
 
-- [ ] **Step 8: Verify scaffold**
+- [ ] **Step 9: Verify scaffold**
 
 Run:
 
@@ -407,10 +441,10 @@ pnpm typecheck
 
 Expected: both commands exit 0.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add package.json pnpm-lock.yaml tsconfig.json next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
+git add package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json next-env.d.ts next.config.ts vitest.config.ts .env.example src/app public/.gitkeep tests/smoke/scaffold.test.ts
 git commit -m "chore: scaffold notion blog app"
 ```
 
@@ -432,12 +466,13 @@ git commit -m "chore: scaffold notion blog app"
 Create `tests/server/prisma-schema.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 describe("Prisma schema", () => {
   const schema = readFileSync("prisma/schema.prisma", "utf8");
   const config = readFileSync("prisma.config.ts", "utf8");
+  const dbClient = readFileSync("src/server/db.ts", "utf8");
 
   it("uses the Prisma 7 generated client", () => {
     expect(schema).toContain("provider = \"prisma-client\"");
@@ -445,6 +480,10 @@ describe("Prisma schema", () => {
     expect(schema).not.toMatch(/url\s*=\s*env\("DATABASE_URL"\)/);
     expect(config).toContain("defineConfig");
     expect(config).toContain("env(\"DATABASE_URL\")");
+    expect(dbClient).toContain("import { PrismaClient } from \"@/generated/prisma/client\"");
+    expect(dbClient).not.toContain("from \"@prisma/client\"");
+    expect(dbClient).toContain("import { PrismaPg } from \"@prisma/adapter-pg\"");
+    expect(dbClient).toContain("adapter: new PrismaPg({ connectionString })");
   });
 
   it("defines publishing state models", () => {
@@ -455,6 +494,22 @@ describe("Prisma schema", () => {
     expect(schema).toContain("model PageSnapshot");
     expect(schema).toContain("model RefreshTarget");
     expect(schema).toContain("model SyncRun");
+  });
+
+  it("models settings as an explicit singleton snapshot", () => {
+    expect(schema).toMatch(/settingsDatabaseId\s+String\s+@unique/);
+    expect(schema).toMatch(/rootPageId\s+String/);
+    expect(schema).toMatch(/headerPageId\s+String\?/);
+    expect(schema).toMatch(/footerPageId\s+String\?/);
+    expect(schema).toMatch(/headJson\s+Json/);
+    expect(schema).not.toContain("settingsJson");
+    expect(schema).not.toContain("sourceId");
+  });
+
+  it("derives visibility and root routing instead of storing duplicate booleans", () => {
+    expect(schema).toContain("publicUrl      String?");
+    expect(schema).not.toContain("isPublic");
+    expect(schema).not.toContain("isRoot");
   });
 
   it("keeps canonical slugs and aliases unique", () => {
@@ -528,12 +583,15 @@ enum SyncRunStatus {
 }
 
 model SiteSettings {
-  id           String   @id @default(cuid())
-  settingsJson Json
-  sourceId     String
-  lastSyncedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  settingsDatabaseId String   @unique
+  rootPageId         String
+  headerPageId       String?
+  footerPageId       String?
+  headJson           Json
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model NotionPage {
@@ -541,7 +599,6 @@ model NotionPage {
   title          String
   notionUrl      String
   publicUrl      String?
-  isPublic       Boolean       @default(false)
   lastEditedTime DateTime?
   lastSyncedAt   DateTime?
   createdAt      DateTime      @default(now())
@@ -554,7 +611,6 @@ model NotionPage {
 model PageRoute {
   pageId        String     @id
   canonicalSlug String     @unique
-  isRoot        Boolean    @default(false)
   isActive      Boolean    @default(true)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -642,7 +698,7 @@ if (process.env.NODE_ENV !== "production") {
 Run:
 
 ```bash
-pnpm db:generate
+DATABASE_URL="postgresql://notion_blog:notion_blog@localhost:5432/notion_blog?schema=public" pnpm db:generate
 pnpm test:run tests/server/prisma-schema.test.ts
 pnpm typecheck
 ```

@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SlugAliasStatus {
+  ACTIVE
+  INACTIVE
+  CONFLICTED
+}
+
+enum RefreshTargetKind {
+  SETTINGS
+  PAGE
+}
+
+enum SyncRunStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model SiteSettings {
+  id                 String   @id @default(cuid())
+  settingsDatabaseId String   @unique
+  rootPageId         String
+  headerPageId       String?
+  footerPageId       String?
+  headJson           Json
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model NotionPage {
+  pageId         String        @id
+  title          String
+  notionUrl      String
+  publicUrl      String?
+  lastEditedTime DateTime?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  route          PageRoute?
+  aliases        SlugAlias[]
+  snapshot       PageSnapshot?
+}
+
+model PageRoute {
+  pageId        String     @id
+  canonicalSlug String     @unique
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  page          NotionPage @relation(fields: [pageId], references: [pageId], onDelete: Cascade)
+}
+
+model SlugAlias {
+  id        String          @id @default(cuid())
+  pageId    String
+  slug      String          @unique
+  status    SlugAliasStatus @default(ACTIVE)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  page      NotionPage      @relation(fields: [pageId], references: [pageId], onDelete: Cascade)
+
+  @@index([pageId])
+}
+
+model PageSnapshot {
+  pageId              String     @id
+  snapshotJson        Json
+  notionLastEditedTime DateTime
+  capturedAt          DateTime   @default(now())
+  page                NotionPage @relation(fields: [pageId], references: [pageId], onDelete: Cascade)
+}
+
+model RefreshTarget {
+  targetKind    RefreshTargetKind
+  targetId      String
+  nextRefreshAt DateTime
+  lastSyncedAt  DateTime?
+  failureCount  Int               @default(0)
+  lastError     String?
+  lockedAt      DateTime?
+  lockedBy      String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@id([targetKind, targetId])
+  @@index([nextRefreshAt])
+  @@index([lockedAt])
+}
+
+model SyncRun {
+  id         String            @id @default(cuid())
+  targetKind RefreshTargetKind
+  targetId   String
+  status     SyncRunStatus
+  startedAt  DateTime
+  finishedAt DateTime?
+  error      String?
+}
