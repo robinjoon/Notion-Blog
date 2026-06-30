@@ -56,6 +56,8 @@ describe("Helm chart", () => {
 
     expect(workerDeployment).toContain('command: ["pnpm", "worker"]');
     expect(migrationJob).toContain('command: ["pnpm", "db:migrate"]');
+    expect(migrationJob).toContain('"helm.sh/hook": pre-install,pre-upgrade');
+    expect(migrationJob).toContain('"helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded');
 
     expect(service).toContain("selector:");
     expect(service).toContain("app.kubernetes.io/name: notion-blog");
@@ -73,5 +75,11 @@ describe("DB-backed routes", () => {
     expect(homePage).toContain('export const dynamic = "force-dynamic"');
     expect(slugPage).toContain('export const dynamic = "force-dynamic"');
     expect(layout).toContain('export const dynamic = "force-dynamic"');
+  });
+
+  it("does not enable standalone output while one image also runs worker and migrations", () => {
+    const nextConfig = readFileSync("next.config.ts", "utf8");
+
+    expect(nextConfig).not.toContain('output: "standalone"');
   });
 });

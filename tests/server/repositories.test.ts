@@ -291,20 +291,22 @@ describe("blog repository", () => {
         where: { pageId: "0123456789abcdef0123456789abcdef" },
         create: expect.objectContaining({
           pageId: "0123456789abcdef0123456789abcdef",
-          canonicalSlug: "/"
+          canonicalSlug: "/",
+          isActive: false
         })
       })
     );
     expect(pageRouteUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("moves the root route from the old root page to the new root page atomically", async () => {
+  it("keeps the previous root route active while a changed root page is not cached yet", async () => {
     const notionPageUpsert = vi.fn().mockResolvedValue(undefined);
     const siteSettingsUpsert = vi.fn().mockResolvedValue(undefined);
-    const pageRouteFindUnique = vi
-      .fn()
-      .mockResolvedValueOnce({ pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", canonicalSlug: "/" })
-      .mockResolvedValueOnce({ pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", canonicalSlug: "/new-root" });
+    const pageRouteFindUnique = vi.fn().mockResolvedValue({
+      pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      canonicalSlug: "/",
+      isActive: true
+    });
     const pageRouteUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const pageRouteUpsert = vi.fn().mockResolvedValue(undefined);
     const tx = {
@@ -336,6 +338,68 @@ describe("blog repository", () => {
       headJson: {}
     });
 
+    expect(pageRouteUpdateMany).not.toHaveBeenCalled();
+    expect(pageRouteUpsert).not.toHaveBeenCalled();
+  });
+
+  it("promotes a changed root route only after the new root page snapshot is public", async () => {
+    const pageRouteFindUnique = vi.fn().mockImplementation(async ({ where }) => {
+      if ("canonicalSlug" in where && where.canonicalSlug === "/") {
+        return { pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", canonicalSlug: "/", isActive: true };
+      }
+      if ("pageId" in where && where.pageId === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") {
+        return { pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", canonicalSlug: "/new-root", isActive: true };
+      }
+      return null;
+    });
+    const pageRouteUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const pageRouteUpsert = vi.fn().mockResolvedValue(undefined);
+    const slugAliasUpsert = vi.fn().mockResolvedValue(undefined);
+    const refreshTargetUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      notionPage: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      pageRoute: {
+        findUnique: pageRouteFindUnique,
+        updateMany: pageRouteUpdateMany,
+        upsert: pageRouteUpsert
+      },
+      slugAlias: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: slugAliasUpsert
+      },
+      pageSnapshot: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      refreshTarget: {
+        upsert: refreshTargetUpsert
+      },
+      siteSettings: {
+        findFirst: vi.fn().mockResolvedValue({ rootPageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (work: (inner: typeof tx) => Promise<void>) => work(tx))
+    };
+    const repository = createBlogRepository(prisma as never);
+    const syncedAt = new Date("2026-06-30T00:00:00.000Z");
+    const nextRefreshAt = new Date("2026-06-30T00:15:00.000Z");
+
+    await repository.upsertPageSnapshot({
+      pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      title: "New Root",
+      notionUrl: "https://www.notion.so/new-root",
+      publicUrl: "https://site.notion.site/new-root",
+      lastEditedTime: "2026-06-30T00:00:00.000Z",
+      blocks: [],
+      syncedAt,
+      nextRefreshAt
+    });
+
     expect(pageRouteUpdateMany).toHaveBeenCalledWith({
       where: {
         pageId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -345,11 +409,28 @@ describe("blog repository", () => {
         canonicalSlug: "/page-aaaaaaaa"
       }
     });
+    expect(slugAliasUpsert).toHaveBeenCalledWith({
+      where: { slug: "/new-root" },
+      update: {
+        pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        status: "ACTIVE"
+      },
+      create: {
+        pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        slug: "/new-root",
+        status: "ACTIVE"
+      }
+    });
     expect(pageRouteUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { pageId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
         update: expect.objectContaining({
-          canonicalSlug: "/"
+          canonicalSlug: "/",
+          isActive: true
+        }),
+        create: expect.objectContaining({
+          canonicalSlug: "/",
+          isActive: true
         })
       })
     );
@@ -415,6 +496,72 @@ describe("blog repository", () => {
         })
       })
     );
+  });
+
+  it("queues linked page ids discovered in a persisted page snapshot", async () => {
+    const refreshTargetUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      notionPage: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      pageRoute: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      slugAlias: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null)
+      },
+      pageSnapshot: {
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      refreshTarget: {
+        upsert: refreshTargetUpsert
+      },
+      siteSettings: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async (work: (inner: typeof tx) => Promise<void>) => work(tx))
+    };
+    const repository = createBlogRepository(prisma as never);
+    const syncedAt = new Date("2026-06-30T00:00:00.000Z");
+    const nextRefreshAt = new Date("2026-06-30T00:15:00.000Z");
+
+    await repository.upsertPageSnapshot({
+      pageId: "0123456789abcdef0123456789abcdef",
+      title: "Page A",
+      notionUrl: "https://www.notion.so/page-a",
+      publicUrl: "https://site.notion.site/page-a",
+      lastEditedTime: "2026-06-30T00:00:00.000Z",
+      blocks: [],
+      linkedPageIds: ["fedcba9876543210fedcba9876543210"],
+      syncedAt,
+      nextRefreshAt
+    });
+
+    expect(refreshTargetUpsert).toHaveBeenCalledWith({
+      where: {
+        targetKind_targetId: {
+          targetKind: "PAGE",
+          targetId: "fedcba9876543210fedcba9876543210"
+        }
+      },
+      update: {},
+      create: {
+        targetKind: "PAGE",
+        targetId: "fedcba9876543210fedcba9876543210",
+        nextRefreshAt: syncedAt,
+        lastSyncedAt: null,
+        failureCount: 0,
+        lastError: null,
+        lockedAt: null,
+        lockedBy: null
+      }
+    });
   });
 
   it("completes a claimed refresh target by clearing the lock and scheduling the next run", async () => {

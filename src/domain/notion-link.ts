@@ -1,14 +1,14 @@
 const NOTION_HOST_SUFFIXES = ["notion.so", "notion.site"];
 const NOTION_ID_PATTERN = /([0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i;
 
-function normalizePageId(pageId: string): string | null {
+export function normalizeNotionPageId(pageId: string): string | null {
   const normalized = pageId.replace(/-/g, "").toLowerCase();
   return /^[0-9a-f]{32}$/.test(normalized) ? normalized : null;
 }
 
 export function parseNotionPageReference(input: string): { pageId: string } | null {
   const trimmed = input.trim();
-  const rawPageId = normalizePageId(trimmed);
+  const rawPageId = normalizeNotionPageId(trimmed);
   if (rawPageId) {
     return { pageId: rawPageId };
   }
@@ -29,6 +29,6 @@ export function parseNotionPageReference(input: string): { pageId: string } | nu
     return null;
   }
 
-  const pageId = normalizePageId(match[1]);
+  const pageId = normalizeNotionPageId(match[1]);
   return pageId ? { pageId } : null;
 }

@@ -1,3 +1,4 @@
+import { normalizeNotionPageId, parseNotionPageReference } from "@/domain/notion-link";
 import type { NotionGateway as GatewayNotionGateway } from "@/notion/gateway";
 import type { PageMetadata } from "@/notion/page-mapper";
 
@@ -13,6 +14,7 @@ export interface NotionBlockSnapshot {
 
 export interface PageSnapshot extends PageMetadata {
   blocks: NotionBlockSnapshot[];
+  linkedPageIds?: string[];
 }
 
 type NotionBlockLike = {
@@ -27,6 +29,61 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNotionBlockLike(value: unknown): value is NotionBlockLike {
   return isRecord(value) && typeof value.id === "string" && typeof value.type === "string";
+}
+
+function addNotionReference(value: string, linkedPageIds: Set<string>) {
+  const reference = parseNotionPageReference(value);
+  if (reference) {
+    linkedPageIds.add(reference.pageId);
+  }
+}
+
+function collectLinkedPageIdsFromValue(value: unknown, linkedPageIds: Set<string>, key?: string) {
+  if (typeof value === "string") {
+    if (key === "href" || key === "url") {
+      addNotionReference(value, linkedPageIds);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectLinkedPageIdsFromValue(item, linkedPageIds);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (value.type === "child_page" && typeof value.id === "string") {
+    const pageId = normalizeNotionPageId(value.id);
+    if (pageId) {
+      linkedPageIds.add(pageId);
+    }
+  }
+
+  const mention = value.mention;
+  if (isRecord(mention) && mention.type === "page" && isRecord(mention.page) && typeof mention.page.id === "string") {
+    const pageId = normalizeNotionPageId(mention.page.id);
+    if (pageId) {
+      linkedPageIds.add(pageId);
+    }
+  }
+
+  for (const [childKey, childValue] of Object.entries(value)) {
+    collectLinkedPageIdsFromValue(childValue, linkedPageIds, childKey);
+  }
+}
+
+function collectLinkedPageIds(blocks: NotionBlockSnapshot[], currentPageId: string): string[] {
+  const linkedPageIds = new Set<string>();
+  for (const block of blocks) {
+    collectLinkedPageIdsFromValue(block.data, linkedPageIds);
+  }
+  linkedPageIds.delete(currentPageId);
+  return Array.from(linkedPageIds);
 }
 
 async function collectChildBlocks(
@@ -52,8 +109,11 @@ export async function collectPageSnapshot(
   pageId: string,
   metadata: PageMetadata
 ): Promise<PageSnapshot> {
+  const blocks = await collectChildBlocks(gateway, pageId);
+
   return {
     ...metadata,
-    blocks: await collectChildBlocks(gateway, pageId)
+    blocks,
+    linkedPageIds: collectLinkedPageIds(blocks, metadata.pageId)
   };
 }

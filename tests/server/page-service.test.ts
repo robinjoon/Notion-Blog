@@ -128,8 +128,8 @@ describe("page service", () => {
     });
   });
 
-  it("collects a linked page and redirects to its canonical slug", async () => {
-    const snapshot = createSnapshot("page-a", "Hello");
+  it("redirects a cached linked page without syncing through Notion", async () => {
+    const snapshot = createSnapshot("0123456789abcdef0123456789abcdef", "Hello");
     const storedPages = new Map<string, ReturnType<typeof createPageRecord>>([
       [snapshot.pageId, createPageRecord(snapshot, "/hello")]
     ]);
@@ -150,37 +150,20 @@ describe("page service", () => {
       })
     };
     const notion = {
-      retrievePage: vi.fn().mockResolvedValue({
-        id: snapshot.pageId,
-        url: snapshot.notionUrl,
-        public_url: snapshot.publicUrl,
-        last_edited_time: snapshot.lastEditedTime,
-        properties: {
-          title: {
-            type: "title",
-            title: [{ plain_text: snapshot.title }]
-          }
-        }
-      }),
-      retrieveBlockChildren: vi.fn().mockResolvedValue([
-        {
-          id: snapshot.blocks[0].id,
-          type: "paragraph",
-          has_children: false,
-          rich_text: [{ plain_text: "Hello body" }]
-        }
-      ]),
+      retrievePage: vi.fn().mockRejectedValue(new Error("should not sync cached links inline")),
+      retrieveBlockChildren: vi.fn(),
       querySettingsDatabase: vi.fn()
     };
     const service = createPageService({ notion, repository });
 
-    await expect(service.collectLinkedPage("page-a")).resolves.toEqual({
+    await expect(service.collectLinkedPage(snapshot.pageId)).resolves.toEqual({
       kind: "redirect",
       destination: "/hello"
     });
+    expect(notion.retrievePage).not.toHaveBeenCalled();
   });
 
-  it("returns notFound when a collected linked page is private", async () => {
+  it("does not sync malformed linked page ids", async () => {
     const repository = {
       resolveRoute: vi.fn().mockResolvedValue({ kind: "not-found" }),
       getPageContent: vi.fn().mockResolvedValue(null),
@@ -189,18 +172,7 @@ describe("page service", () => {
       upsertPageSnapshot: vi.fn()
     };
     const notion = {
-      retrievePage: vi.fn().mockResolvedValue({
-        id: "private-page",
-        url: "https://notion.so/private-page",
-        public_url: null,
-        last_edited_time: "2026-06-30T00:00:00.000Z",
-        properties: {
-          title: {
-            type: "title",
-            title: [{ plain_text: "Private page" }]
-          }
-        }
-      }),
+      retrievePage: vi.fn().mockRejectedValue(new Error("should not call Notion for malformed ids")),
       retrieveBlockChildren: vi.fn(),
       querySettingsDatabase: vi.fn()
     };
@@ -209,5 +181,61 @@ describe("page service", () => {
     await expect(service.collectLinkedPage("private-page")).resolves.toEqual({
       kind: "notFound"
     });
+    expect(notion.retrievePage).not.toHaveBeenCalled();
+  });
+
+  it("queues allowed uncached linked pages instead of syncing them inline", async () => {
+    const now = new Date("2026-06-30T00:00:00.000Z");
+    const linkedPageId = "fedcba9876543210fedcba9876543210";
+    const repository = {
+      resolveRoute: vi.fn().mockResolvedValue({ kind: "not-found" }),
+      getPageContent: vi.fn().mockResolvedValue(null),
+      getSiteSettings: vi.fn().mockResolvedValue({ head: {} satisfies SiteHeadSettings }),
+      hasPageRefreshTarget: vi.fn().mockResolvedValue(true),
+      ensureRefreshTarget: vi.fn().mockResolvedValue(undefined),
+      markPagePrivate: vi.fn().mockResolvedValue(undefined),
+      upsertPageSnapshot: vi.fn()
+    };
+    const notion = {
+      retrievePage: vi.fn().mockRejectedValue(new Error("should not sync queued links inline")),
+      retrieveBlockChildren: vi.fn(),
+      querySettingsDatabase: vi.fn()
+    };
+    const service = createPageService({ notion, repository, now: () => now });
+
+    await expect(service.collectLinkedPage(linkedPageId)).resolves.toEqual({
+      kind: "notFound"
+    });
+    expect(repository.ensureRefreshTarget).toHaveBeenCalledWith({
+      targetKind: "page",
+      targetId: linkedPageId,
+      nextRefreshAt: now
+    });
+    expect(notion.retrievePage).not.toHaveBeenCalled();
+  });
+
+  it("does not queue unknown linked page ids that were not discovered earlier", async () => {
+    const linkedPageId = "fedcba9876543210fedcba9876543210";
+    const repository = {
+      resolveRoute: vi.fn().mockResolvedValue({ kind: "not-found" }),
+      getPageContent: vi.fn().mockResolvedValue(null),
+      getSiteSettings: vi.fn().mockResolvedValue({ head: {} satisfies SiteHeadSettings }),
+      hasPageRefreshTarget: vi.fn().mockResolvedValue(false),
+      ensureRefreshTarget: vi.fn().mockResolvedValue(undefined),
+      markPagePrivate: vi.fn().mockResolvedValue(undefined),
+      upsertPageSnapshot: vi.fn()
+    };
+    const notion = {
+      retrievePage: vi.fn().mockRejectedValue(new Error("should not call Notion for undiscovered ids")),
+      retrieveBlockChildren: vi.fn(),
+      querySettingsDatabase: vi.fn()
+    };
+    const service = createPageService({ notion, repository });
+
+    await expect(service.collectLinkedPage(linkedPageId)).resolves.toEqual({
+      kind: "notFound"
+    });
+    expect(repository.ensureRefreshTarget).not.toHaveBeenCalled();
+    expect(notion.retrievePage).not.toHaveBeenCalled();
   });
 });

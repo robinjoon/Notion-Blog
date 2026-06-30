@@ -1,4 +1,5 @@
 import { collectPageSnapshot } from "@/notion/block-collector";
+import { normalizeNotionPageId } from "@/domain/notion-link";
 import { simpleRefreshPolicy } from "@/domain/refresh-policy";
 import type { SiteHeadSettings } from "@/domain/settings";
 import type { NotionGateway } from "@/notion/gateway";
@@ -9,7 +10,9 @@ import { createBlogRepository, type BlogRepository, type CachedPageContent, type
 interface PageServiceDependencies {
   notion: NotionGateway;
   repository: Pick<BlogRepository, "markPagePrivate" | "upsertPageSnapshot"> &
-    Partial<Pick<BlogRepository, "getPageContent" | "getSiteSettings" | "resolveRoute">>;
+    Partial<
+      Pick<BlogRepository, "ensureRefreshTarget" | "getPageContent" | "getSiteSettings" | "hasPageRefreshTarget" | "resolveRoute">
+    >;
   settingsDatabaseId?: string;
   now?: () => Date;
 }
@@ -138,20 +141,36 @@ export function createPageService({
     },
 
     async collectLinkedPage(pageId: string): Promise<{ kind: "redirect"; destination: string } | { kind: "notFound" }> {
-      await this.syncPage(pageId);
-      if (typeof repository.getPageContent !== "function") {
-        throw new Error("page reads are not configured");
-      }
-      const page = await repository.getPageContent(pageId);
-
-      if (!page) {
+      const normalizedPageId = normalizeNotionPageId(pageId);
+      if (!normalizedPageId) {
         return { kind: "notFound" };
       }
 
-      return {
-        kind: "redirect",
-        destination: page.slug
-      };
+      if (typeof repository.getPageContent !== "function") {
+        throw new Error("page reads are not configured");
+      }
+
+      const page = await repository.getPageContent(normalizedPageId);
+      if (page) {
+        return {
+          kind: "redirect",
+          destination: page.slug
+        };
+      }
+
+      if (typeof repository.hasPageRefreshTarget !== "function" || !(await repository.hasPageRefreshTarget(normalizedPageId))) {
+        return { kind: "notFound" };
+      }
+
+      if (typeof repository.ensureRefreshTarget === "function") {
+        await repository.ensureRefreshTarget({
+          targetKind: "page",
+          targetId: normalizedPageId,
+          nextRefreshAt: now()
+        });
+      }
+
+      return { kind: "notFound" };
     },
 
     async getSiteSettings(): Promise<SiteSettingsSnapshot | null> {
