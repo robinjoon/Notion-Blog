@@ -1,101 +1,114 @@
-# Notion-Blog
+# Notion Blog
 
-Notion-Blog renders a Notion root page as a self-hosted public blog.
+Notion을 편집 도구로 사용하고, 공개 페이지를 자체 도메인의 서버 렌더링 블로그로 제공하는 셀프 호스팅 애플리케이션입니다.
 
-이 프로젝트는 비공개 Notion 설정 데이터베이스에서 블로그 설정을 읽고, 공개 가능한 Notion 페이지를 수집해 Next.js 블로그로 서빙합니다. 웹 앱과 동기화 worker가 분리되어 있으며, PostgreSQL에는 페이지 스냅샷과 라우트 상태를 캐시합니다.
+Notion API에서 가져온 페이지와 블록은 PostgreSQL에 퍼블리싱 스냅샷으로 저장됩니다. 방문 요청은 저장된 스냅샷을 먼저 렌더링하므로 Notion이 일시적으로 응답하지 않아도 기존 공개 콘텐츠를 계속 제공할 수 있습니다.
 
 ## Stack
 
-- Next.js App Router
-- TypeScript
-- Prisma
-- PostgreSQL
-- Notion API
+- JDK 25
+- Kotlin 2.3
+- Spring Boot 4.1
+- Spring MVC + Thymeleaf
+- JetBrains Exposed JDBC DSL
+- PostgreSQL + Flyway
+- Gradle Kotlin DSL
 - Docker
-- Helm
 
-## Required Environment
+별도 worker나 migration 프로세스는 없습니다. 하나의 Spring Boot 프로세스가 웹 요청, Flyway migration, Notion 주기 갱신을 담당합니다.
 
-- Node.js 24 LTS or newer
-- Helm v4.2.2 or newer
-- `DATABASE_URL`
-- `NOTION_TOKEN`
-- `SETTINGS_DATABASE_ID`
+전체 설계와 결정은 [Kotlin/Spring 재구축 설계](docs/kotlin-spring-architecture.md), 에이전트 작업 규칙은 [AGENTS.md](AGENTS.md)에 있습니다.
 
-`NOTION_TOKEN`은 설정 데이터베이스와 페이지 수집에 모두 사용합니다. `SETTINGS_DATABASE_ID`는 사이트 설정만 담는 비공개 Notion 데이터베이스 ID이며, 루트 페이지 선택도 이 데이터베이스의 `rootPage` row에서 결정됩니다.
+## Requirements
 
-기본 예시는 [.env.example](.env.example) 에 있습니다.
+- JDK 25
+- PostgreSQL 16 이상 권장
+- Docker: Testcontainers 통합 테스트와 이미지 build에 필요
 
-```bash
-DATABASE_URL="postgresql://notion_blog:notion_blog@localhost:5432/notion_blog?schema=public"
-NOTION_TOKEN="secret_xxx"
-SETTINGS_DATABASE_ID="00000000000000000000000000000000"
+시스템 Gradle 설치는 필요하지 않습니다. 저장소의 Gradle Wrapper를 사용합니다.
+
+## Configuration
+
+예시는 [.env.example](.env.example)에 있습니다.
+
+필수 변수:
+
+```text
+SPRING_DATASOURCE_URL
+SPRING_DATASOURCE_USERNAME
+SPRING_DATASOURCE_PASSWORD
+NOTION_TOKEN
+NOTION_SETTINGS_DATA_SOURCE_ID
+NOTION_API_VERSION
+BLOG_BASE_URL
 ```
 
-## Local Commands
+Notion token은 repository나 container image에 직접 넣지 않습니다. 실행 환경에서 환경변수로 주입합니다.
 
-- `pnpm install`
-- `pnpm db:generate`
-- `pnpm db:migrate`
-- `pnpm dev`
-- `pnpm worker`
-- `pnpm test:run`
-- `pnpm typecheck`
-- `pnpm build`
+Notion 설정 data source의 property와 row 구성은 [Notion 설정 스키마](docs/notion-settings-schema.md)를 참고합니다.
 
-권장 순서는 아래와 같습니다.
+## Local Development
+
+환경변수를 준비한 다음 애플리케이션을 실행합니다.
 
 ```bash
-pnpm install
-pnpm db:generate
-pnpm db:migrate
-pnpm dev
+cp .env.example .env
+set -a
+source .env
+set +a
+./gradlew bootRun
 ```
 
-worker는 별도 터미널에서 실행합니다.
+기본 포트는 `8080`입니다. 시작 시 Flyway가 스키마를 적용하고, scheduler가 설정 data source를 bootstrap합니다. 아직 루트 스냅샷이 없으면 `/`는 초기화 중이라는 의미로 `503`을 반환합니다.
+
+## Verification
 
 ```bash
-pnpm worker
+./gradlew test
+./gradlew build
 ```
 
-검증 명령은 아래 3개를 기준으로 맞춰져 있습니다.
+테스트 구성:
+
+- domain: slug, Notion page ID, route/visibility, refresh backoff
+- Notion boundary: pagination, recursive blocks, deadline, mapping, error classification
+- persistence boundary: Flyway, JSONB, `timestamptz`, FK/unique, route ownership, rollback
+- application: public/private refresh, lazy collection, stale refresh, settings bootstrap
+- web/rendering: HTTP status, redirects, complete HTML, block rendering, unsafe link 차단
+- repository boundary: 배포 하네스 manifest 미포함, Java 25 container 계약
+
+Rancher Desktop에서 Testcontainers가 기본 socket과 published host를 찾지 못하면 환경에 맞는 값을 지정합니다.
 
 ```bash
-pnpm test:run
-pnpm typecheck
-pnpm build
+DOCKER_HOST=unix://$HOME/.rd/docker.sock \
+TESTCONTAINERS_RYUK_DISABLED=true \
+TESTCONTAINERS_HOST_OVERRIDE=192.168.64.2 \
+./gradlew test
 ```
 
-## Deployment
+`TESTCONTAINERS_HOST_OVERRIDE`는 로컬 Rancher Desktop VM 구성에 따라 다를 수 있습니다.
 
-The Helm chart lives in `deploy/helm/notion-blog`.
-It expects an existing Kubernetes Secret referenced by `env.existingSecret`.
-
-현재 chart는 web Deployment, worker Deployment, migration Job, Service, 선택적 Ingress를 렌더링합니다. 기본 Secret 이름은 `notion-blog-env`이며, 이 Secret 안에 최소한 `DATABASE_URL`, `NOTION_TOKEN`, `SETTINGS_DATABASE_ID`가 있어야 합니다.
-
-Docker 이미지는 루트의 [Dockerfile](Dockerfile) 로 빌드합니다.
+## Docker
 
 ```bash
 docker build -t notion-blog:local .
+docker run --rm --env-file .env -p 8080:8080 notion-blog:local
 ```
 
-Helm 렌더링 확인:
+Runtime container는 UID/GID `10001`로 실행됩니다. read-only root filesystem과 `/tmp` 쓰기 볼륨 같은 실행 정책은 외부 하네스에서 설정합니다.
 
-```bash
-helm template notion-blog deploy/helm/notion-blog \
-  --set image.repository=notion-blog \
-  --set image.tag=test
-```
+## Deployment Boundary
 
-배포 예시:
+이 저장소는 애플리케이션 소스, Gradle/Flyway 설정, Dockerfile과 CI workflow만 소유합니다. Helm chart, Kubernetes manifest, GitOps 설정은 별도 하네스 저장소에서 관리합니다.
 
-```bash
-helm upgrade --install notion-blog deploy/helm/notion-blog \
-  --set image.repository=<registry>/notion-blog \
-  --set image.tag=<tag> \
-  --set env.existingSecret=notion-blog-env
-```
+외부 하네스에는 생성한 image와 [Configuration](#configuration)의 환경변수를 전달하면 됩니다. 애플리케이션은 `8080` 포트와 `/actuator/health/liveness`, `/actuator/health/readiness` endpoint를 제공합니다. 현재 scheduler는 다중 인스턴스 조정을 하지 않으므로 동시에 scheduler를 활성화하는 인스턴스는 하나여야 합니다.
 
-Ingress가 필요하면 `deploy/helm/notion-blog/values.yaml`의 `ingress.enabled`, `ingress.hosts`, `ingress.tls`를 환경에 맞게 override해서 배포하면 됩니다.
+## Runtime Behavior
 
-설정 데이터베이스 스키마와 각 row 의미는 [docs/notion-settings-schema.md](docs/notion-settings-schema.md) 에 정리되어 있습니다.
+- `/`: 설정의 `rootPage`를 렌더링합니다.
+- `/{slug}`: 공개 canonical page를 렌더링합니다.
+- 과거 alias: 현재 canonical path로 `301` 응답합니다.
+- `/notion/{pageId}`: 이미 콘텐츠에서 발견한 page만 제한된 시간 안에 수집하고 canonical path로 `303` 응답합니다.
+- stale snapshot: 즉시 렌더링하고 bounded executor로 갱신을 요청합니다.
+- 비공개 전환: snapshot은 보존하지만 모든 공개 route를 비활성화합니다.
+- 갱신 실패: 기존 snapshot을 유지하고 지수 backoff를 적용합니다.

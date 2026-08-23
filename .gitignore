@@ -44,9 +44,9 @@ node_modules/
 
 # Next.js and frontend build output
 .next/
-out/
-dist/
-build/
+/out/
+/dist/
+/build/
 .vercel/
 .turbo/
 
@@ -60,6 +60,10 @@ test-results/
 playwright-report/
 blob-report/
 
+# Gradle and Kotlin build caches
+/.gradle/
+/.kotlin/
+
 # Prisma and local database files
 *.db
 *.db-journal
@@ -71,17 +75,6 @@ src/generated/prisma/
 # Docker and local compose overrides
 docker-compose.override.yml
 compose.override.yml
-
-# Kubernetes and Helm local/generated artifacts
-.kube/
-*.kubeconfig
-deploy/helm/**/*.tgz
-deploy/helm/**/values.local.yaml
-deploy/helm/**/values.*.local.yaml
-deploy/helm/**/values.secret.yaml
-deploy/helm/**/values.secrets.yaml
-deploy/helm/**/secrets.yaml
-deploy/helm/**/secret-values.yaml
 
 # OS and archive leftovers
 *.tmp
