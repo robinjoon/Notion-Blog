@@ -1,12 +1,5 @@
 package xyz.robinjoon.notionblog.config
 
-import java.time.Clock
-import java.time.Duration
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -25,6 +18,13 @@ import xyz.robinjoon.notionblog.application.service.PageRefreshService
 import xyz.robinjoon.notionblog.application.service.SettingsRefreshService
 import xyz.robinjoon.notionblog.application.service.TransactionalPageStore
 import xyz.robinjoon.notionblog.application.service.TransactionalSettingsStore
+import java.time.Clock
+import java.time.Duration
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(NotionProperties::class, BlogProperties::class)
@@ -39,22 +39,19 @@ class ApplicationConfiguration {
     fun pageSnapshotCodec(): TaggedPageSnapshotCodec = TaggedPageSnapshotCodec()
 
     @Bean
-    fun notionGateway(properties: NotionProperties): NotionRestClientAdapter =
-        NotionRestClientAdapter(
-            baseUrl = properties.baseUrl,
-            token = properties.token,
-            apiVersion = properties.apiVersion,
-            requestTimeout = properties.requestTimeout,
-            totalCollectionTimeout = properties.collectionTimeout,
-        )
+    fun notionGateway(properties: NotionProperties): NotionRestClientAdapter = NotionRestClientAdapter(
+        baseUrl = properties.baseUrl,
+        token = properties.token,
+        apiVersion = properties.apiVersion,
+        requestTimeout = properties.requestTimeout,
+        totalCollectionTimeout = properties.collectionTimeout,
+    )
 
     @Bean
-    fun transactionalPageStore(persistence: BlogPersistencePort): TransactionalPageStore =
-        TransactionalPageStore(persistence)
+    fun transactionalPageStore(persistence: BlogPersistencePort): TransactionalPageStore = TransactionalPageStore(persistence)
 
     @Bean
-    fun transactionalSettingsStore(persistence: BlogPersistencePort): TransactionalSettingsStore =
-        TransactionalSettingsStore(persistence)
+    fun transactionalSettingsStore(persistence: BlogPersistencePort): TransactionalSettingsStore = TransactionalSettingsStore(persistence)
 
     @Bean
     fun pageRefreshService(
@@ -81,15 +78,14 @@ class ApplicationConfiguration {
         blogProperties: BlogProperties,
         clock: Clock,
         store: TransactionalSettingsStore,
-    ): SettingsRefreshService =
-        SettingsRefreshService(
-            gateway,
-            persistence,
-            properties.settingsDataSourceId,
-            clock,
-            store,
-            refreshInterval = Duration.ofMillis(blogProperties.refresh.intervalMs),
-        )
+    ): SettingsRefreshService = SettingsRefreshService(
+        gateway,
+        persistence,
+        properties.settingsDataSourceId,
+        clock,
+        store,
+        refreshInterval = Duration.ofMillis(blogProperties.refresh.intervalMs),
+    )
 
     @Bean(destroyMethod = "shutdown")
     fun pageRefreshExecutor(properties: BlogProperties): ThreadPoolExecutor {
@@ -123,6 +119,5 @@ class ApplicationConfiguration {
 private class PageRefreshThreadFactory : ThreadFactory {
     private val sequence = AtomicInteger()
 
-    override fun newThread(task: Runnable): Thread =
-        Thread(task, "page-refresh-${sequence.incrementAndGet()}").apply { isDaemon = true }
+    override fun newThread(task: Runnable): Thread = Thread(task, "page-refresh-${sequence.incrementAndGet()}").apply { isDaemon = true }
 }

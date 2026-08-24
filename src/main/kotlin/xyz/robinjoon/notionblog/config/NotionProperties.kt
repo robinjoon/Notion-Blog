@@ -1,7 +1,7 @@
 package xyz.robinjoon.notionblog.config
 
-import java.time.Duration
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.time.Duration
 
 @ConfigurationProperties("notion")
 data class NotionProperties(

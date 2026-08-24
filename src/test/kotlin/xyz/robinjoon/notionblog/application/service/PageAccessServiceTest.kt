@@ -1,20 +1,20 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
+import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
+import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
-import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
 import xyz.robinjoon.notionblog.application.port.out.persistence.ResolvedRoute
 import xyz.robinjoon.notionblog.application.port.out.persistence.SiteSettingsWrite
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
 import xyz.robinjoon.notionblog.domain.model.PageRouteKind
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 class PageAccessServiceTest {
     @Test
@@ -48,7 +48,10 @@ class PageAccessServiceTest {
             PageRefreshRequester { },
             Clock.systemUTC(),
             Codec,
-            RefreshPageUseCase { persistence.routeAvailable = true; true },
+            RefreshPageUseCase {
+                persistence.routeAvailable = true
+                true
+            },
         )
 
         assertThat(service.collectKnownPage(pageId.value)).isEqualTo(LazyCollectionResult.Redirect("/post"))
@@ -70,8 +73,7 @@ class PageAccessServiceTest {
         override fun makePagePrivate(pageId: NotionPageId, refreshAfter: Instant, lastError: String?) = Unit
         override fun touchPublicPage(pageId: NotionPageId, syncedAt: Instant, refreshAfter: Instant) = Unit
         override fun isKnownPage(pageId: NotionPageId): Boolean = known
-        override fun findRoutesForPage(pageId: NotionPageId): List<PageRoute> =
-            if (routeAvailable) listOf(PageRoute("/post", pageId, PageRouteKind.CANONICAL)) else emptyList()
+        override fun findRoutesForPage(pageId: NotionPageId): List<PageRoute> = if (routeAvailable) listOf(PageRoute("/post", pageId, PageRouteKind.CANONICAL)) else emptyList()
     }
 
     private object Codec : PageSnapshotCodec {

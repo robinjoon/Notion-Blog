@@ -1,16 +1,14 @@
 package xyz.robinjoon.notionblog.adapter.out.persistence
 
-import java.time.Instant
-import java.time.ZoneOffset
-import org.springframework.transaction.annotation.Transactional
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.lessEq
-import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.upsert
+import org.springframework.transaction.annotation.Transactional
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
@@ -20,6 +18,8 @@ import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
 import xyz.robinjoon.notionblog.domain.model.PageRouteKind
 import xyz.robinjoon.notionblog.domain.model.PageVisibility
+import java.time.Instant
+import java.time.ZoneOffset
 
 @Transactional(readOnly = true)
 class ExposedBlogPersistenceAdapter : BlogPersistencePort {
@@ -170,10 +170,12 @@ class ExposedBlogPersistenceAdapter : BlogPersistencePort {
                     it[active] = route.active
                     it[createdAt] = snapshot.capturedAt.offset()
                 }
+
                 existing[PageRouteTable.pageId] == route.pageId.value -> PageRouteTable.update({ PageRouteTable.path eq route.path }) {
                     it[kind] = route.kind.name
                     it[active] = route.active
                 }
+
                 else -> throw IllegalStateException("route path is already owned by another page")
             }
         }

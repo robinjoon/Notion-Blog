@@ -173,8 +173,10 @@ class NotionRestClientAdapter(
     private fun classifyHttpFailure(operation: String, statusCode: Int): RuntimeException = when {
         statusCode == 429 || statusCode >= 500 ->
             RetryableNotionException("Notion request failed while attempting to $operation", statusCode)
+
         statusCode == 401 || statusCode == 403 ->
             NotionAuthenticationException("Notion authentication or permission failed while attempting to $operation", statusCode)
+
         else ->
             NotionConfigurationException("Notion rejected the request while attempting to $operation", statusCode)
     }
@@ -187,9 +189,8 @@ class NotionRestClientAdapter(
         throw NotionConfigurationException("Notion returned invalid $description data")
     }
 
-    private fun requiredText(node: JsonNode, field: String, description: String): String =
-        node.path(field).asString("").takeIf(String::isNotBlank)
-            ?: throw NotionConfigurationException("Notion $description is missing $field")
+    private fun requiredText(node: JsonNode, field: String, description: String): String = node.path(field).asString("").takeIf(String::isNotBlank)
+        ?: throw NotionConfigurationException("Notion $description is missing $field")
 
     private fun validateBaseUrl(value: String): String {
         require(value.isNotBlank()) { "Notion base URL must not be blank" }

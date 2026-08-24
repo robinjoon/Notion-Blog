@@ -1,9 +1,9 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.util.concurrent.Executor
-import java.util.concurrent.RejectedExecutionException
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
+import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 
 fun interface PageRefreshRequester {
     fun request(pageId: NotionPageId)

@@ -1,8 +1,5 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -16,13 +13,16 @@ import xyz.robinjoon.notionblog.application.port.out.notion.NotionSettingKind
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionSettingsRow
 import xyz.robinjoon.notionblog.application.port.out.notion.RetryableNotionException
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
+import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
-import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
 import xyz.robinjoon.notionblog.application.port.out.persistence.ResolvedRoute
 import xyz.robinjoon.notionblog.application.port.out.persistence.SiteSettingsWrite
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 @ExtendWith(OutputCaptureExtension::class)
 class RefreshServicesTest {
@@ -32,12 +32,14 @@ class RefreshServicesTest {
     @Test
     fun `settings refresh validates root head JSON and discovers its referenced pages`() {
         val persistence = RecordingPersistence()
-        val gateway = Gateway(settingsRows = listOf(
-            row("rootPage", NotionSettingKind.PAGE, "0123456789abcdef0123456789abcdef"),
-            row("header", NotionSettingKind.BLOCKS, "11111111111111111111111111111111"),
-            row("footer", NotionSettingKind.BLOCKS, "22222222222222222222222222222222"),
-            row("head", NotionSettingKind.HEAD, data = "{\"siteName\":\"Blog\"}"),
-        ))
+        val gateway = Gateway(
+            settingsRows = listOf(
+                row("rootPage", NotionSettingKind.PAGE, "0123456789abcdef0123456789abcdef"),
+                row("header", NotionSettingKind.BLOCKS, "11111111111111111111111111111111"),
+                row("footer", NotionSettingKind.BLOCKS, "22222222222222222222222222222222"),
+                row("head", NotionSettingKind.HEAD, data = "{\"siteName\":\"Blog\"}"),
+            ),
+        )
 
         SettingsRefreshService(gateway, persistence, "settings-db", clock).refresh()
 
@@ -181,8 +183,7 @@ class RefreshServicesTest {
         assertThat(Regex("Page refresh failed").findAll(logs).count()).isEqualTo(1)
     }
 
-    private fun row(key: String, kind: NotionSettingKind, page: String = "", data: String = "") =
-        NotionSettingsRow(key, kind, enabled = true, page = page, data = data)
+    private fun row(key: String, kind: NotionSettingKind, page: String = "", data: String = "") = NotionSettingsRow(key, kind, enabled = true, page = page, data = data)
 
     private class Gateway(
         private val settingsRows: List<NotionSettingsRow> = emptyList(),
@@ -194,18 +195,28 @@ class RefreshServicesTest {
         var inRemoteCall = false
         var contentCalls = 0
 
-        override fun retrievePage(pageId: NotionPageId): NotionPageMetadata = remote { metadataFailure?.let { throw it }; requireNotNull(metadata) }
+        override fun retrievePage(pageId: NotionPageId): NotionPageMetadata = remote {
+            metadataFailure?.let { throw it }
+            requireNotNull(metadata)
+        }
 
         override fun retrievePageContent(pageId: NotionPageId): NotionPageContent = remote {
             contentCalls += 1
             content
         }
 
-        override fun querySettingsDataSource(dataSourceId: String): List<NotionSettingsRow> = remote { settingsFailure?.let { throw it }; settingsRows }
+        override fun querySettingsDataSource(dataSourceId: String): List<NotionSettingsRow> = remote {
+            settingsFailure?.let { throw it }
+            settingsRows
+        }
 
         private fun <T> remote(block: () -> T): T {
             inRemoteCall = true
-            return try { block() } finally { inRemoteCall = false }
+            return try {
+                block()
+            } finally {
+                inRemoteCall = false
+            }
         }
     }
 
@@ -224,10 +235,18 @@ class RefreshServicesTest {
         override fun findPublicPageSnapshot(pageId: NotionPageId): PublicPageSnapshot? = previous
         override fun findDuePageIds(now: Instant, limit: Int): List<NotionPageId> = emptyList()
         override fun findDueSettingsDataSourceIds(now: Instant, limit: Int): List<String> = emptyList()
-        override fun recordDiscoveredPage(pageId: NotionPageId, refreshAfter: Instant) { discovered += pageId }
-        override fun savePublicPageSnapshot(snapshot: PublicPageSnapshotWrite) { savedSnapshot = snapshot }
-        override fun saveSettings(settings: SiteSettingsWrite) { this.settings = settings }
-        override fun makePagePrivate(pageId: NotionPageId, refreshAfter: Instant, lastError: String?) { privatePageId = pageId }
+        override fun recordDiscoveredPage(pageId: NotionPageId, refreshAfter: Instant) {
+            discovered += pageId
+        }
+        override fun savePublicPageSnapshot(snapshot: PublicPageSnapshotWrite) {
+            savedSnapshot = snapshot
+        }
+        override fun saveSettings(settings: SiteSettingsWrite) {
+            this.settings = settings
+        }
+        override fun makePagePrivate(pageId: NotionPageId, refreshAfter: Instant, lastError: String?) {
+            privatePageId = pageId
+        }
         override fun touchPublicPage(pageId: NotionPageId, syncedAt: Instant, refreshAfter: Instant) = Unit
         override fun pageFailureCount(pageId: NotionPageId): Int = pageFailures
         override fun settingsFailureCount(settingsDataSourceId: String): Int = settingsFailures

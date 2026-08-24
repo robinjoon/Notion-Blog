@@ -1,10 +1,10 @@
 package xyz.robinjoon.notionblog.domain.policy
 
-import java.time.Duration
-import java.time.Instant
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.time.Duration
+import java.time.Instant
 
 class RefreshPolicyTest {
     private val now = Instant.parse("2026-06-29T00:00:00Z")

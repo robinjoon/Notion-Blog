@@ -1,6 +1,5 @@
 package xyz.robinjoon.notionblog.config
 
-import java.time.Clock
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -9,6 +8,7 @@ import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshSettingsUseCase
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.scheduling.RefreshScheduler
+import java.time.Clock
 
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -21,11 +21,10 @@ class RefreshSchedulingConfiguration {
         settingsRefresh: RefreshSettingsUseCase,
         notion: NotionProperties,
         clock: Clock,
-    ): RefreshScheduler =
-        RefreshScheduler(
-            persistence,
-            pageRefresh,
-            mapOf(notion.settingsDataSourceId to settingsRefresh),
-            clock,
-        )
+    ): RefreshScheduler = RefreshScheduler(
+        persistence,
+        pageRefresh,
+        mapOf(notion.settingsDataSourceId to settingsRefresh),
+        clock,
+    )
 }

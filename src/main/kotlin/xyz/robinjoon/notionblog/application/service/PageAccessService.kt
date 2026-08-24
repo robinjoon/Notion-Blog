@@ -1,13 +1,13 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.time.Clock
-import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
-import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
-import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
-import xyz.robinjoon.notionblog.application.port.out.persistence.ResolvedRoute
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
+import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
+import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
+import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
+import xyz.robinjoon.notionblog.application.port.out.persistence.ResolvedRoute
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.NotionPageReference
+import java.time.Clock
 
 class PageAccessService(
     private val persistence: BlogPersistencePort,
@@ -20,10 +20,12 @@ class PageAccessService(
         val normalizedPath = if (path.startsWith('/')) path else "/$path"
         return when (val route = persistence.resolveRoute(normalizedPath)) {
             is ResolvedRoute.Redirect -> PageLookupResult.Redirect(route.destination)
+
             is ResolvedRoute.Page -> persistence.findPublicPageSnapshot(route.pageId)
                 ?.also { snapshot -> if (!snapshot.refreshAfter.isAfter(clock.instant())) pageRefresh.request(route.pageId) }
                 ?.let { PageLookupResult.Page(it.pageId, it.title, snapshotCodec.decode(it.snapshotJson), it) }
                 ?: PageLookupResult.NotFound
+
             null -> PageLookupResult.NotFound
         }
     }

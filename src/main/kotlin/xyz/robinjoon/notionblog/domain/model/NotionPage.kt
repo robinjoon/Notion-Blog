@@ -75,7 +75,9 @@ object PageRoutes {
                     hasNewCanonical = true
                     route.copy(kind = PageRouteKind.CANONICAL, active = true)
                 }
+
                 route.active && route.kind == PageRouteKind.CANONICAL -> route.copy(kind = PageRouteKind.ALIAS)
+
                 else -> route
             }
         }

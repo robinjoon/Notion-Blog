@@ -1,13 +1,13 @@
 package xyz.robinjoon.notionblog.scheduling
 
-import java.time.Clock
-import java.time.Instant
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshSettingsUseCase
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
+import java.time.Clock
+import java.time.Instant
 
 class RefreshScheduler(
     private val persistence: BlogPersistencePort,

@@ -1,7 +1,5 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.time.Clock
-import java.time.Duration
 import org.slf4j.LoggerFactory
 import tools.jackson.databind.json.JsonMapper
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshSettingsUseCase
@@ -17,6 +15,8 @@ import xyz.robinjoon.notionblog.application.port.out.persistence.SiteSettingsWri
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.NotionPageReference
 import xyz.robinjoon.notionblog.domain.policy.RefreshPolicy
+import java.time.Clock
+import java.time.Duration
 
 class SettingsRefreshService(
     private val gateway: NotionGateway,
@@ -29,8 +29,7 @@ class SettingsRefreshService(
     private val jsonMapper = JsonMapper.builder().build()
     private val logger = LoggerFactory.getLogger(SettingsRefreshService::class.java)
 
-    override fun refresh(): SettingsRefreshResult {
-        return try {
+    override fun refresh(): SettingsRefreshResult = try {
         val rows = gateway.querySettingsDataSource(settingsDataSourceId)
         val root = rows.firstEnabled("rootPage")?.page?.toPageId()
             ?: throw IllegalArgumentException(ROOT_PAGE_ERROR)
@@ -51,22 +50,20 @@ class SettingsRefreshService(
             )
         store.save(settings, listOfNotNull(root, header, footer))
         SettingsRefreshResult(root, header, footer, headJson)
-        } catch (exception: RuntimeException) {
-            logFailure(exception)
-            val failureCount = persistence.settingsFailureCount(settingsDataSourceId) + 1
-            val now = clock.instant()
-            store.recordFailure(
-                settingsDataSourceId,
-                failureCount,
-                RefreshPolicy.nextSettingsFailureAt(now, refreshInterval, failureCount),
-                exception::class.simpleName ?: "refresh failure",
-            )
-            throw exception
-        }
+    } catch (exception: RuntimeException) {
+        logFailure(exception)
+        val failureCount = persistence.settingsFailureCount(settingsDataSourceId) + 1
+        val now = clock.instant()
+        store.recordFailure(
+            settingsDataSourceId,
+            failureCount,
+            RefreshPolicy.nextSettingsFailureAt(now, refreshInterval, failureCount),
+            exception::class.simpleName ?: "refresh failure",
+        )
+        throw exception
     }
 
-    private fun List<NotionSettingsRow>.firstEnabled(key: String): NotionSettingsRow? =
-        firstOrNull { it.enabled && it.key == key }
+    private fun List<NotionSettingsRow>.firstEnabled(key: String): NotionSettingsRow? = firstOrNull { it.enabled && it.key == key }
 
     private fun String.toPageId(): NotionPageId? = NotionPageReference.parse(this)
 

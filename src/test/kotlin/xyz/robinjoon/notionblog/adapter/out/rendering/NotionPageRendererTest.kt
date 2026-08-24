@@ -145,7 +145,11 @@ class NotionPageRendererTest {
         )
 
         assertThat(html).contains(
-            "<strong>", "<em>", "<u>", "<s>", "<code>",
+            "<strong>",
+            "<em>",
+            "<u>",
+            "<s>",
+            "<code>",
             "href=\"/notion/0123456789abcdef0123456789abcdef\"",
             "href=\"https://example.com/post\"",
         )

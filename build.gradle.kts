@@ -3,6 +3,7 @@ plugins {
     kotlin("plugin.spring") version "2.3.21"
     id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
 group = "xyz.robinjoon"
@@ -16,6 +17,24 @@ java {
 
 repositories {
     mavenCentral()
+}
+
+ktlint {
+    version.set("1.8.0")
+    ignoreFailures.set(false)
+    outputToConsole.set(true)
+}
+
+// Keep ktlint on the Kotlin compiler version bundled with its rule engine.
+configurations.matching { it.name.startsWith("ktlint") }.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin") {
+            requested.version?.let { requestedVersion ->
+                useVersion(requestedVersion)
+                because("ktlint must use the Kotlin compiler version it was built with")
+            }
+        }
+    }
 }
 
 val exposedVersion = "1.4.0"

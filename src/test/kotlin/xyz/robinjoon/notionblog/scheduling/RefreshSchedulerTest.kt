@@ -3,9 +3,6 @@ package xyz.robinjoon.notionblog.scheduling
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -17,6 +14,9 @@ import xyz.robinjoon.notionblog.application.port.`in`.RefreshSettingsUseCase
 import xyz.robinjoon.notionblog.application.port.`in`.SettingsRefreshResult
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 @ExtendWith(OutputCaptureExtension::class)
 class RefreshSchedulerTest {

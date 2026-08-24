@@ -10,7 +10,7 @@ class NotionBlockTest {
         val block = ParagraphBlock(
             id = "block-1",
             richText = listOf(RichText("Read "), RichText("this", annotations = RichTextAnnotations(bold = true), link = "https://example.com")),
-            children = listOf(QuoteBlock("block-2", listOf(RichText("Nested quote"))))
+            children = listOf(QuoteBlock("block-2", listOf(RichText("Nested quote")))),
         )
 
         assertThat(block.richText.map(RichText::plainText)).containsExactly("Read ", "this")

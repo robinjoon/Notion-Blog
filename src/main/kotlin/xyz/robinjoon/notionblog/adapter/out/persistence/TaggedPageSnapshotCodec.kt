@@ -2,8 +2,8 @@ package xyz.robinjoon.notionblog.adapter.out.persistence
 
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.DefaultTyping
-import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator
 import tools.jackson.databind.json.JsonMapper
+import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator
 import tools.jackson.module.kotlin.KotlinModule
 import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
 import xyz.robinjoon.notionblog.domain.model.NotionBlock

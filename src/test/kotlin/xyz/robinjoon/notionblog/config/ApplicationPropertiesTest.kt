@@ -1,11 +1,11 @@
 package xyz.robinjoon.notionblog.config
 
-import java.time.Duration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Configuration
+import java.time.Duration
 
 class ApplicationPropertiesTest {
     private val contextRunner = ApplicationContextRunner()

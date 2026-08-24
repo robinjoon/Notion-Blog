@@ -78,17 +78,24 @@ class NotionPageRenderer(
 
     private fun viewBlock(block: NotionBlock): BlockView = when (block) {
         is ParagraphBlock -> BlockView("paragraph", block.id, richText = richText(block.richText), children = viewBlocks(block.children))
+
         is HeadingBlock -> BlockView(
             kind = headingKind(block.level),
             id = block.id,
             richText = richText(block.richText),
             children = viewBlocks(block.children),
         )
+
         is BulletedListItemBlock -> BlockView("bulleted_list_item", block.id, richText(block.richText), viewBlocks(block.children))
+
         is NumberedListItemBlock -> BlockView("numbered_list_item", block.id, richText(block.richText), viewBlocks(block.children))
+
         is ToDoBlock -> BlockView("to_do", block.id, richText(block.richText), viewBlocks(block.children), checked = block.checked)
+
         is ToggleBlock -> BlockView("toggle", block.id, richText(block.richText), viewBlocks(block.children))
+
         is QuoteBlock -> BlockView("quote", block.id, richText(block.richText), viewBlocks(block.children))
+
         is CalloutBlock -> BlockView(
             kind = "callout",
             id = block.id,
@@ -96,7 +103,9 @@ class NotionPageRenderer(
             children = viewBlocks(block.children),
             icon = block.icon ?: "!",
         )
+
         is DividerBlock -> BlockView("divider", block.id)
+
         is CodeBlock -> BlockView(
             kind = "code",
             id = block.id,
@@ -105,6 +114,7 @@ class NotionPageRenderer(
             language = safeCssToken(block.language),
             children = viewBlocks(block.children),
         )
+
         is ImageBlock -> BlockView(
             kind = "image",
             id = block.id,
@@ -112,6 +122,7 @@ class NotionPageRenderer(
             caption = richText(block.caption),
             children = viewBlocks(block.children),
         )
+
         is VideoBlock -> BlockView(
             kind = "video",
             id = block.id,
@@ -119,6 +130,7 @@ class NotionPageRenderer(
             caption = richText(block.caption),
             children = viewBlocks(block.children),
         )
+
         is FileBlock -> BlockView(
             kind = "file",
             id = block.id,
@@ -127,6 +139,7 @@ class NotionPageRenderer(
             caption = richText(block.caption),
             children = viewBlocks(block.children),
         )
+
         is BookmarkBlock -> BlockView(
             kind = "bookmark",
             id = block.id,
@@ -134,18 +147,22 @@ class NotionPageRenderer(
             caption = richText(block.caption),
             children = viewBlocks(block.children),
         )
+
         is TableBlock -> BlockView(
             kind = "table",
             id = block.id,
             rows = block.children.filterIsInstance<TableRowBlock>().map(::viewRow),
         )
+
         is TableRowBlock -> BlockView(
             kind = "table_row",
             id = block.id,
             rows = listOf(viewRow(block)),
             children = viewBlocks(block.children),
         )
+
         is ColumnBlock -> BlockView("column", block.id, children = viewBlocks(block.children))
+
         is ChildPageBlock -> BlockView(
             kind = "child_page",
             id = block.id,
@@ -153,6 +170,7 @@ class NotionPageRenderer(
             url = "/notion/${block.pageId.value}",
             children = viewBlocks(block.children),
         )
+
         is UnsupportedBlock -> BlockView(
             kind = "unsupported",
             id = block.id,

@@ -1,13 +1,10 @@
 package xyz.robinjoon.notionblog
 
-import java.time.Clock
-import java.time.ZoneOffset
-import java.util.concurrent.ThreadPoolExecutor
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.health.actuate.endpoint.HealthEndpoint
+import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationContext
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
@@ -22,6 +19,9 @@ import xyz.robinjoon.notionblog.application.service.SettingsRefreshService
 import xyz.robinjoon.notionblog.application.service.TransactionalPageStore
 import xyz.robinjoon.notionblog.application.service.TransactionalSettingsStore
 import xyz.robinjoon.notionblog.scheduling.RefreshScheduler
+import java.time.Clock
+import java.time.ZoneOffset
+import java.util.concurrent.ThreadPoolExecutor
 
 @SpringBootTest(
     properties = [

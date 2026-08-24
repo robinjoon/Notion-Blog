@@ -1,7 +1,7 @@
 package xyz.robinjoon.notionblog.config
 
-import java.net.URI
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.net.URI
 
 @ConfigurationProperties("blog")
 data class BlogProperties(

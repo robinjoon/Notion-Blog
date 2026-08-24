@@ -1,7 +1,5 @@
 package xyz.robinjoon.notionblog.adapter.out.persistence
 
-import java.sql.Connection
-import java.sql.DriverManager
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
@@ -19,6 +17,8 @@ import xyz.robinjoon.notionblog.application.port.out.persistence.ResolvedRoute
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
 import xyz.robinjoon.notionblog.domain.model.PageRouteKind
+import java.sql.Connection
+import java.sql.DriverManager
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PersistenceSchemaIntegrationTest {
@@ -61,7 +61,7 @@ class PersistenceSchemaIntegrationTest {
                 from information_schema.columns
                 where table_schema = 'public'
                   and table_name in ('site_settings', 'notion_page', 'page_snapshot', 'page_route')
-                """.trimIndent()
+                """.trimIndent(),
             ).executeQuery().use { rows ->
                 buildMap {
                     while (rows.next()) {
@@ -109,9 +109,15 @@ class PersistenceSchemaIntegrationTest {
             connection.autoCommit = false
             try {
                 connection.prepareStatement("update notion_page set visibility = 'PRIVATE', public_url = null where page_id = ?")
-                    .use { statement -> statement.setString(1, PAGE_A); statement.executeUpdate() }
+                    .use { statement ->
+                        statement.setString(1, PAGE_A)
+                        statement.executeUpdate()
+                    }
                 connection.prepareStatement("update page_route set active = false where page_id = ?")
-                    .use { statement -> statement.setString(1, PAGE_A); statement.executeUpdate() }
+                    .use { statement ->
+                        statement.setString(1, PAGE_A)
+                        statement.executeUpdate()
+                    }
                 assertThatThrownBy { insertRoute(connection, "/post", PAGE_A, "ALIAS") }
                 connection.rollback()
             } finally {
@@ -119,7 +125,7 @@ class PersistenceSchemaIntegrationTest {
             }
 
             connection.prepareStatement(
-                "select p.visibility, r.active from notion_page p join page_route r on r.page_id = p.page_id where p.page_id = ?"
+                "select p.visibility, r.active from notion_page p join page_route r on r.page_id = p.page_id where p.page_id = ?",
             ).use { statement ->
                 statement.setString(1, PAGE_A)
                 statement.executeQuery().use { row ->
@@ -153,7 +159,7 @@ class PersistenceSchemaIntegrationTest {
                     snapshotJson = "{\"blocks\":[]}",
                     capturedAt = capturedAt,
                     routes = listOf(PageRoute("/persisted-post", pageId, PageRouteKind.CANONICAL)),
-                )
+                ),
             )
 
             assertThat(adapter.resolveRoute("/persisted-post"))
@@ -177,7 +183,7 @@ class PersistenceSchemaIntegrationTest {
             """
             insert into notion_page (page_id, title, notion_url, public_url, visibility, refresh_after, failure_count)
             values (?, 'Post', 'https://www.notion.so/post', 'https://www.notion.so/post', 'PUBLIC', now(), 0)
-            """.trimIndent()
+            """.trimIndent(),
         ).use { statement ->
             statement.setString(1, pageId)
             statement.executeUpdate()
@@ -195,7 +201,7 @@ class PersistenceSchemaIntegrationTest {
 
     private fun insertSnapshot(connection: Connection, pageId: String) {
         connection.prepareStatement(
-            "insert into page_snapshot (page_id, snapshot_json, notion_last_edited_at, captured_at) values (?, '{}'::jsonb, now(), now())"
+            "insert into page_snapshot (page_id, snapshot_json, notion_last_edited_at, captured_at) values (?, '{}'::jsonb, now(), now())",
         ).use { statement ->
             statement.setString(1, pageId)
             statement.executeUpdate()

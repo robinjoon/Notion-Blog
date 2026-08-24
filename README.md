@@ -64,9 +64,18 @@ set +a
 ## Verification
 
 ```bash
+./gradlew ktlintCheck
 ./gradlew test
 ./gradlew build
 ```
+
+Kotlin과 Gradle Kotlin DSL의 포맷을 자동 수정하려면 다음 명령을 사용합니다.
+
+```bash
+./gradlew ktlintFormat
+```
+
+루트 [`.editorconfig`](.editorconfig)가 Kotlin 코드 스타일의 기준입니다. IntelliJ에서는 EditorConfig 지원을 켜고 `Detect and use existing file indents for editing`을 끕니다. 내장 Kotlin 포매터를 사용하되 저장 시 `Rearrange code`와 `Run code cleanup`은 함께 실행하지 않습니다. 최종 검사는 Gradle의 `ktlintCheck`가 담당합니다.
 
 테스트 구성:
 

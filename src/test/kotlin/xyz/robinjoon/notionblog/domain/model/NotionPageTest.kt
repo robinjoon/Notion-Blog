@@ -21,7 +21,7 @@ class NotionPageTest {
             title = "Post",
             visibility = PageVisibility.PUBLIC,
             publicUrl = "https://www.notion.so/post",
-            routes = listOf(PageRoute("/post", pageId, PageRouteKind.CANONICAL))
+            routes = listOf(PageRoute("/post", pageId, PageRouteKind.CANONICAL)),
         )
 
         val withdrawn = page.withdraw()
@@ -41,8 +41,8 @@ class NotionPageTest {
                 publicUrl = "https://www.notion.so/post",
                 routes = listOf(
                     PageRoute("/post", pageId, PageRouteKind.CANONICAL),
-                    PageRoute("/post-new", pageId, PageRouteKind.CANONICAL)
-                )
+                    PageRoute("/post-new", pageId, PageRouteKind.CANONICAL),
+                ),
             )
         }.withMessage("a page can have at most one active canonical route")
     }
@@ -53,11 +53,11 @@ class NotionPageTest {
             PageRoutes.changeCanonical(
                 routes = listOf(PageRoute("/first", pageId, PageRouteKind.CANONICAL)),
                 pageId = pageId,
-                newPath = "/second"
-            )
+                newPath = "/second",
+            ),
         ).containsExactly(
             PageRoute("/first", pageId, PageRouteKind.ALIAS),
-            PageRoute("/second", pageId, PageRouteKind.CANONICAL)
+            PageRoute("/second", pageId, PageRouteKind.CANONICAL),
         )
     }
 

@@ -1,9 +1,5 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.time.Clock
-import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ThreadLocalRandom
 import org.slf4j.LoggerFactory
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionAuthenticationException
@@ -11,14 +7,18 @@ import xyz.robinjoon.notionblog.application.port.out.notion.NotionConfigurationE
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionGateway
 import xyz.robinjoon.notionblog.application.port.out.notion.RetryableNotionException
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
-import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
 import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
+import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
 import xyz.robinjoon.notionblog.domain.model.PageRouteKind
 import xyz.robinjoon.notionblog.domain.model.PageRoutes
 import xyz.robinjoon.notionblog.domain.model.Slug
 import xyz.robinjoon.notionblog.domain.policy.RefreshPolicy
+import java.time.Clock
+import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ThreadLocalRandom
 
 class PageRefreshService(
     private val gateway: NotionGateway,

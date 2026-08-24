@@ -39,8 +39,8 @@ class NotionPageReferenceTest {
         assertThat(
             NotionPageReference.parse(
                 "https://workspace.notion.site/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-title-$actualPageId" +
-                    "?other=cccccccccccccccccccccccccccccccc"
-            )
+                    "?other=cccccccccccccccccccccccccccccccc",
+            ),
         ).isEqualTo(NotionPageId(actualPageId))
     }
 }

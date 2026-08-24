@@ -431,14 +431,13 @@ class NotionRestClientAdapterTest {
     private fun adapter(
         requestTimeout: Duration = Duration.ofSeconds(2),
         totalCollectionTimeout: Duration = Duration.ofSeconds(10),
-    ): NotionRestClientAdapter =
-        NotionRestClientAdapter(
-            baseUrl = server.url("/v1").toString(),
-            token = "test-secret",
-            apiVersion = "2026-03-11",
-            requestTimeout = requestTimeout,
-            totalCollectionTimeout = totalCollectionTimeout,
-        )
+    ): NotionRestClientAdapter = NotionRestClientAdapter(
+        baseUrl = server.url("/v1").toString(),
+        token = "test-secret",
+        apiVersion = "2026-03-11",
+        requestTimeout = requestTimeout,
+        totalCollectionTimeout = totalCollectionTimeout,
+    )
 
     private fun MockWebServer.enqueueJson(body: String) {
         enqueue(

@@ -1,10 +1,10 @@
 package xyz.robinjoon.notionblog.application.service
 
-import java.util.concurrent.Executor
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.Test
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
+import java.util.concurrent.Executor
 
 class PageRefreshRequesterTest {
     @Test
