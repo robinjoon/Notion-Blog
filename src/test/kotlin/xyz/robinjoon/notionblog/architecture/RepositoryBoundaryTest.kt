@@ -35,12 +35,11 @@ class RepositoryBoundaryTest {
         assertThat(workflow)
             .contains("IMAGE_TAG: sha-\${{ github.sha }}-run-\${{ github.run_id }}-\${{ github.run_attempt }}")
         assertThat(workflow).contains("push: true")
-        assertThat(workflow).contains("bootstrap-homelab")
         assertThat(workflow).contains("github.ref == 'refs/heads/master'")
         assertThat(workflow).contains("HOMELAB_REGISTRY_USERNAME")
         assertThat(workflow).contains("HOMELAB_REGISTRY_PASSWORD")
         assertThat(workflow)
             .doesNotContain("HARNESS_DEPLOY_KEY", "tools/platform.py", "git push origin HEAD:main")
-        assertThat(workflow).doesNotContain("deploy-*", "kubectl", "KUBECONFIG")
+        assertThat(workflow).doesNotContain("bootstrap-homelab", "deploy-*", "kubectl", "KUBECONFIG")
     }
 }
