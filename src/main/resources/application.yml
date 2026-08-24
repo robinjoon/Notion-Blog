@@ -23,7 +23,7 @@ blog:
   base-url: ${BLOG_BASE_URL}
   refresh:
     enabled: ${BLOG_REFRESH_ENABLED:true}
-    fixed-delay-ms: ${BLOG_REFRESH_FIXED_DELAY_MS:60000}
+    interval-ms: ${BLOG_REFRESH_INTERVAL_MS:${BLOG_REFRESH_FIXED_DELAY_MS:60000}}
     thread-count: ${BLOG_REFRESH_THREAD_COUNT:2}
     queue-capacity: ${BLOG_REFRESH_QUEUE_CAPACITY:32}
 

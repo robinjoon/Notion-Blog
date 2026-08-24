@@ -23,7 +23,7 @@ class ApplicationPropertiesTest {
                 "notion.collection-timeout=20s",
                 "blog.base-url=https://blog.example.com",
                 "blog.refresh.enabled=false",
-                "blog.refresh.fixed-delay-ms=45000",
+                "blog.refresh.interval-ms=45000",
                 "blog.refresh.thread-count=3",
                 "blog.refresh.queue-capacity=24",
             )
@@ -41,7 +41,7 @@ class ApplicationPropertiesTest {
                 val blog = context.getBean(BlogProperties::class.java)
                 assertThat(blog.baseUrl.toString()).isEqualTo("https://blog.example.com")
                 assertThat(blog.refresh.enabled).isFalse()
-                assertThat(blog.refresh.fixedDelayMs).isEqualTo(45_000)
+                assertThat(blog.refresh.intervalMs).isEqualTo(45_000)
                 assertThat(blog.refresh.threadCount).isEqualTo(3)
                 assertThat(blog.refresh.queueCapacity).isEqualTo(24)
             }

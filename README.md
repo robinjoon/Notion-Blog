@@ -52,9 +52,9 @@ Notion 설정 data source의 property와 row 구성은 [Notion 설정 스키마]
 환경변수를 준비한 다음 애플리케이션을 실행합니다.
 
 ```bash
-cp .env.example .env
+cp .env.example local.env
 set -a
-source .env
+source local.env
 set +a
 ./gradlew bootRun
 ```
@@ -82,7 +82,7 @@ Rancher Desktop에서 Testcontainers가 기본 socket과 published host를 찾�
 ```bash
 DOCKER_HOST=unix://$HOME/.rd/docker.sock \
 TESTCONTAINERS_RYUK_DISABLED=true \
-TESTCONTAINERS_HOST_OVERRIDE=192.168.64.2 \
+TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1 \
 ./gradlew test
 ```
 
@@ -92,7 +92,7 @@ TESTCONTAINERS_HOST_OVERRIDE=192.168.64.2 \
 
 ```bash
 docker build -t notion-blog:local .
-docker run --rm --env-file .env -p 8080:8080 notion-blog:local
+docker run --rm --env-file local.env -p 8080:8080 notion-blog:local
 ```
 
 Runtime container는 UID/GID `10001`로 실행됩니다. read-only root filesystem과 `/tmp` 쓰기 볼륨 같은 실행 정책은 외부 하네스에서 설정합니다.
@@ -111,4 +111,6 @@ Runtime container는 UID/GID `10001`로 실행됩니다. read-only root filesyst
 - `/notion/{pageId}`: 이미 콘텐츠에서 발견한 page만 제한된 시간 안에 수집하고 canonical path로 `303` 응답합니다.
 - stale snapshot: 즉시 렌더링하고 bounded executor로 갱신을 요청합니다.
 - 비공개 전환: snapshot은 보존하지만 모든 공개 route를 비활성화합니다.
-- 갱신 실패: 기존 snapshot을 유지하고 지수 backoff를 적용합니다.
+- 정상 갱신: scheduler와 설정/page metadata 확인에 같은 1분 주기를 사용하고, 변경된 page만 전체 block을 다시 수집합니다.
+- page 갱신 실패: 기존 snapshot을 유지하고 2분에 1~30초의 random jitter를 더한 뒤 다시 시도합니다.
+- 설정 갱신 실패: 기존 snapshot을 유지하고 지수 backoff를 적용합니다.

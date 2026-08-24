@@ -9,3 +9,4 @@ out
 dist
 .env
 .env.*
+local.env

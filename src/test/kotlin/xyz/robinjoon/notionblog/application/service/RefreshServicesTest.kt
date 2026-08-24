@@ -6,11 +6,15 @@ import java.time.ZoneOffset
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionGateway
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionPageContent
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionPageMetadata
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionSettingKind
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionSettingsRow
+import xyz.robinjoon.notionblog.application.port.out.notion.RetryableNotionException
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshot
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
@@ -20,6 +24,7 @@ import xyz.robinjoon.notionblog.application.port.out.persistence.SiteSettingsWri
 import xyz.robinjoon.notionblog.domain.model.NotionPageId
 import xyz.robinjoon.notionblog.domain.model.PageRoute
 
+@ExtendWith(OutputCaptureExtension::class)
 class RefreshServicesTest {
     private val now = Instant.parse("2026-07-01T00:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
@@ -37,6 +42,7 @@ class RefreshServicesTest {
         SettingsRefreshService(gateway, persistence, "settings-db", clock).refresh()
 
         assertThat(persistence.settings?.rootPageId?.value).isEqualTo("0123456789abcdef0123456789abcdef")
+        assertThat(persistence.settings?.refreshAfter).isEqualTo(now.plusSeconds(60))
         assertThat(persistence.discovered.map(NotionPageId::value)).containsExactlyInAnyOrder(
             "0123456789abcdef0123456789abcdef",
             "11111111111111111111111111111111",
@@ -45,11 +51,19 @@ class RefreshServicesTest {
     }
 
     @Test
-    fun `settings refresh rejects a missing root page`() {
+    fun `settings refresh rejects a missing root page with a safe diagnostic log`(output: CapturedOutput) {
         val gateway = Gateway(settingsRows = listOf(row("head", NotionSettingKind.HEAD, data = "{}")))
 
         assertThatThrownBy { SettingsRefreshService(gateway, RecordingPersistence(), "settings-db", clock).refresh() }
-            .hasMessage("settings rootPage is required")
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("settings rootPage must contain a supported Notion page URL or ID")
+
+        val logs = output.out + output.err
+        assertThat(logs)
+            .contains("ERROR", "Settings refresh failed", "targetType=settings", "targetId=settings-db")
+            .contains("errorType=IllegalArgumentException")
+            .contains("detail=settings rootPage must contain a supported Notion page URL or ID")
+        assertThat(Regex("Settings refresh failed").findAll(logs).count()).isEqualTo(1)
     }
 
     @Test
@@ -63,7 +77,7 @@ class RefreshServicesTest {
 
         assertThat(gateway.contentCalls).isEqualTo(1)
         assertThat(persistence.savedSnapshot?.routes).containsExactly(PageRoute("/hello", pageId, xyz.robinjoon.notionblog.domain.model.PageRouteKind.CANONICAL))
-        assertThat(persistence.savedSnapshot?.refreshAfter).isEqualTo(now.plusSeconds(900))
+        assertThat(persistence.savedSnapshot?.refreshAfter).isEqualTo(now.plusSeconds(60))
     }
 
     @Test
@@ -108,26 +122,63 @@ class RefreshServicesTest {
     }
 
     @Test
-    fun `page refresh records increasing failure counts with exponential backoff`() {
+    fun `page refresh records backoff and logs an unknown failure without its message`(output: CapturedOutput) {
         val pageId = NotionPageId("ffffffffffffffffffffffffffffffff")
         val persistence = RecordingPersistence().apply { pageFailures = 1 }
         val failingGateway = Gateway(metadataFailure = IllegalStateException("timeout token=secret-body"))
-        val service = PageRefreshService(failingGateway, persistence, TransactionalPageStore(persistence), clock, SnapshotCodec)
+        val service = PageRefreshService(
+            failingGateway,
+            persistence,
+            TransactionalPageStore(persistence),
+            clock,
+            SnapshotCodec,
+            failureJitterSeconds = { 17 },
+        )
 
         assertThatThrownBy { service.refresh(pageId) }.isInstanceOf(IllegalStateException::class.java)
 
-        assertThat(persistence.pageFailure).isEqualTo(PageFailure(pageId, 2, now.plusSeconds(1_500), "IllegalStateException"))
+        assertThat(persistence.pageFailure).isEqualTo(PageFailure(pageId, 2, now.plusSeconds(137), "IllegalStateException"))
+        val logs = output.out + output.err
+        assertThat(logs)
+            .contains("ERROR", "Page refresh failed", "targetType=page", "targetId=${pageId.value}")
+            .contains("errorType=IllegalStateException")
+            .doesNotContain("token=secret-body")
+        assertThat(Regex("Page refresh failed").findAll(logs).count()).isEqualTo(1)
     }
 
     @Test
-    fun `settings refresh records its failure backoff`() {
+    fun `settings refresh records backoff and logs retryable status without its message`(output: CapturedOutput) {
         val persistence = RecordingPersistence().apply { settingsFailures = 1 }
-        val gateway = Gateway(settingsFailure = IllegalStateException("Notion request failed"))
+        val gateway = Gateway(settingsFailure = RetryableNotionException("token=secret-settings", 503))
 
         assertThatThrownBy { SettingsRefreshService(gateway, persistence, "settings-db", clock).refresh() }
-            .isInstanceOf(IllegalStateException::class.java)
+            .isInstanceOf(RetryableNotionException::class.java)
 
-        assertThat(persistence.settingsFailure).isEqualTo(SettingsFailure("settings-db", 2, now.plusSeconds(660), "IllegalStateException"))
+        assertThat(persistence.settingsFailure).isEqualTo(SettingsFailure("settings-db", 2, now.plusSeconds(660), "RetryableNotionException"))
+        val logs = output.out + output.err
+        assertThat(logs)
+            .contains("WARN", "Settings refresh failed", "targetType=settings", "targetId=settings-db")
+            .contains("errorType=RetryableNotionException", "statusCode=503")
+            .doesNotContain("token=secret-settings")
+        assertThat(Regex("Settings refresh failed").findAll(logs).count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `page refresh logs retryable status once without its message`(output: CapturedOutput) {
+        val pageId = NotionPageId("abababababababababababababababab")
+        val persistence = RecordingPersistence()
+        val gateway = Gateway(metadataFailure = RetryableNotionException("token=secret-page", 429))
+
+        assertThatThrownBy {
+            PageRefreshService(gateway, persistence, TransactionalPageStore(persistence), clock, SnapshotCodec).refresh(pageId)
+        }.isInstanceOf(RetryableNotionException::class.java)
+
+        val logs = output.out + output.err
+        assertThat(logs)
+            .contains("WARN", "Page refresh failed", "targetType=page", "targetId=${pageId.value}")
+            .contains("errorType=RetryableNotionException", "statusCode=429")
+            .doesNotContain("token=secret-page")
+        assertThat(Regex("Page refresh failed").findAll(logs).count()).isEqualTo(1)
     }
 
     private fun row(key: String, kind: NotionSettingKind, page: String = "", data: String = "") =

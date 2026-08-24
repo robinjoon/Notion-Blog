@@ -15,7 +15,12 @@ class AsyncPageRefreshRequester(
 ) : PageRefreshRequester {
     override fun request(pageId: NotionPageId) {
         try {
-            executor.execute { refresh.refresh(pageId) }
+            executor.execute {
+                try {
+                    refresh.refresh(pageId)
+                } catch (_: RuntimeException) {
+                }
+            }
         } catch (_: RejectedExecutionException) {
         }
     }

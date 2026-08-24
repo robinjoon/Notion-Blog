@@ -31,6 +31,8 @@ class PersistenceSchemaIntegrationTest {
         Flyway.configure()
             .dataSource(database.jdbcUrl, database.username, database.password)
             .locations("classpath:db/migration")
+            .connectRetries(5)
+            .connectRetriesInterval(1)
             .load()
             .migrate()
         exposedDatabase = Database.connect(database.jdbcUrl, driver = "org.postgresql.Driver", user = database.username, password = database.password)

@@ -37,7 +37,7 @@ import xyz.robinjoon.notionblog.scheduling.RefreshScheduler
         "notion.collection-timeout=2s",
         "blog.base-url=https://blog.example.com",
         "blog.refresh.enabled=false",
-        "blog.refresh.fixed-delay-ms=60000",
+        "blog.refresh.interval-ms=60000",
         "blog.refresh.thread-count=2",
         "blog.refresh.queue-capacity=16",
     ],

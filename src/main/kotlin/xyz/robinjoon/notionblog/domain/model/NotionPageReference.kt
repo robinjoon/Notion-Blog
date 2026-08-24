@@ -22,7 +22,8 @@ object NotionPageReference {
 
     private fun isNotionHost(host: String?): Boolean {
         val normalizedHost = host?.lowercase() ?: return false
-        return normalizedHost == "notion.so" || normalizedHost.endsWith(".notion.so") ||
+        return normalizedHost == "notion.com" || normalizedHost.endsWith(".notion.com") ||
+            normalizedHost == "notion.so" || normalizedHost.endsWith(".notion.so") ||
             normalizedHost == "notion.site" || normalizedHost.endsWith(".notion.site")
     }
 

@@ -86,6 +86,7 @@ Data    = JSON object
 - root page는 환경변수가 아니라 `rootPage` row에서 선택합니다.
 - 명시적인 Notion page link로 발견된 ID만 lazy 수집 경로에서 허용됩니다.
 - 공개 page는 Notion `public_url`이 있을 때만 route와 snapshot을 제공합니다.
-- 설정 갱신 기본 주기는 1분, page 기본 주기는 15분입니다.
-- 실패 추가 지연은 5분부터 지수 증가하고 60분에서 제한됩니다.
+- 설정 갱신과 page metadata 확인은 단일 정상 주기를 사용하며 기본값은 1분입니다.
+- page 갱신 실패 시에는 2분에 1~30초의 random jitter를 더한 뒤 다시 시도합니다.
+- 설정 갱신 실패의 추가 지연은 5분부터 지수 증가하고 60분에서 제한됩니다.
 - Notion API version은 `NOTION_API_VERSION`으로 고정합니다.

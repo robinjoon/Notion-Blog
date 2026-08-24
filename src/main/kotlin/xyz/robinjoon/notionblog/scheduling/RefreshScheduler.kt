@@ -1,10 +1,13 @@
 package xyz.robinjoon.notionblog.scheduling
 
 import java.time.Clock
+import java.time.Instant
+import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshSettingsUseCase
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
+import xyz.robinjoon.notionblog.domain.model.NotionPageId
 
 class RefreshScheduler(
     private val persistence: BlogPersistencePort,
@@ -12,18 +15,57 @@ class RefreshScheduler(
     private val settingsRefresh: Map<String, RefreshSettingsUseCase>,
     private val clock: Clock,
 ) {
-    @Scheduled(fixedDelayString = "\${blog.refresh.fixed-delay-ms:60000}")
+    private val logger = LoggerFactory.getLogger(RefreshScheduler::class.java)
+
+    @Scheduled(fixedDelayString = "\${blog.refresh.interval-ms:60000}")
     fun refreshDue() {
         val now = clock.instant()
         settingsRefresh.forEach { (dataSourceId, refresh) ->
-            if (runCatching { !persistence.hasSettings(dataSourceId) }.getOrDefault(false)) {
-                runCatching { refresh.refresh() }
+            if (hasNoSettings(dataSourceId)) {
+                ignoreHandledFailure { refresh.refresh() }
             }
         }
-        runCatching { persistence.findDueSettingsDataSourceIds(now, BATCH_SIZE) }.getOrDefault(emptyList()).forEach { dataSourceId ->
-            settingsRefresh[dataSourceId]?.let { refresh -> runCatching { refresh.refresh() } }
+        findDueSettings(now).forEach { dataSourceId ->
+            settingsRefresh[dataSourceId]?.let { refresh -> ignoreHandledFailure { refresh.refresh() } }
         }
-        runCatching { persistence.findDuePageIds(now, BATCH_SIZE) }.getOrDefault(emptyList()).forEach { pageId -> runCatching { pageRefresh.refresh(pageId) } }
+        findDuePages(now).forEach { pageId -> ignoreHandledFailure { pageRefresh.refresh(pageId) } }
+    }
+
+    private fun ignoreHandledFailure(refresh: () -> Unit) {
+        try {
+            refresh()
+        } catch (_: RuntimeException) {
+        }
+    }
+
+    private fun hasNoSettings(dataSourceId: String): Boolean = try {
+        !persistence.hasSettings(dataSourceId)
+    } catch (exception: RuntimeException) {
+        logLookupFailure("hasSettings", dataSourceId, exception)
+        false
+    }
+
+    private fun findDueSettings(now: Instant): List<String> = try {
+        persistence.findDueSettingsDataSourceIds(now, BATCH_SIZE)
+    } catch (exception: RuntimeException) {
+        logLookupFailure("findDueSettings", "all", exception)
+        emptyList()
+    }
+
+    private fun findDuePages(now: Instant): List<NotionPageId> = try {
+        persistence.findDuePageIds(now, BATCH_SIZE)
+    } catch (exception: RuntimeException) {
+        logLookupFailure("findDuePages", "all", exception)
+        emptyList()
+    }
+
+    private fun logLookupFailure(operation: String, targetId: String, exception: RuntimeException) {
+        logger.error(
+            "Refresh target lookup failed operation={} targetType=scheduler targetId={} errorType={}",
+            operation,
+            targetId,
+            exception::class.simpleName ?: "RuntimeException",
+        )
     }
 
     private companion object {

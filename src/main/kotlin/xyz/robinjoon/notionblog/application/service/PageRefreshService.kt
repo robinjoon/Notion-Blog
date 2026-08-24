@@ -1,9 +1,15 @@
 package xyz.robinjoon.notionblog.application.service
 
 import java.time.Clock
+import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ThreadLocalRandom
+import org.slf4j.LoggerFactory
 import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
+import xyz.robinjoon.notionblog.application.port.out.notion.NotionAuthenticationException
+import xyz.robinjoon.notionblog.application.port.out.notion.NotionConfigurationException
 import xyz.robinjoon.notionblog.application.port.out.notion.NotionGateway
+import xyz.robinjoon.notionblog.application.port.out.notion.RetryableNotionException
 import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
 import xyz.robinjoon.notionblog.application.port.out.persistence.PublicPageSnapshotWrite
 import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
@@ -13,7 +19,6 @@ import xyz.robinjoon.notionblog.domain.model.PageRouteKind
 import xyz.robinjoon.notionblog.domain.model.PageRoutes
 import xyz.robinjoon.notionblog.domain.model.Slug
 import xyz.robinjoon.notionblog.domain.policy.RefreshPolicy
-import xyz.robinjoon.notionblog.domain.policy.RefreshTargetKind
 
 class PageRefreshService(
     private val gateway: NotionGateway,
@@ -21,8 +26,11 @@ class PageRefreshService(
     private val store: TransactionalPageStore,
     private val clock: Clock,
     private val snapshotCodec: PageSnapshotCodec,
+    private val refreshInterval: Duration = Duration.ofMinutes(1),
+    private val failureJitterSeconds: () -> Long = { ThreadLocalRandom.current().nextLong(1, 31) },
 ) : RefreshPageUseCase {
     private val refreshing = ConcurrentHashMap.newKeySet<NotionPageId>()
+    private val logger = LoggerFactory.getLogger(PageRefreshService::class.java)
 
     override fun refresh(pageId: NotionPageId): Boolean {
         if (!refreshing.add(pageId)) {
@@ -31,7 +39,7 @@ class PageRefreshService(
         try {
             val metadata = gateway.retrievePage(pageId)
             val now = clock.instant()
-            val refreshAfter = RefreshPolicy.nextRefreshAt(RefreshTargetKind.PAGE, 0, now)
+            val refreshAfter = RefreshPolicy.nextSuccessfulRefreshAt(now, refreshInterval)
             if (metadata.publicUrl == null) {
                 store.makePrivate(metadata.id, refreshAfter)
                 return true
@@ -60,12 +68,13 @@ class PageRefreshService(
             )
             return true
         } catch (exception: RuntimeException) {
+            logFailure(pageId, exception)
             val failureCount = persistence.pageFailureCount(pageId) + 1
             val now = clock.instant()
             store.recordFailure(
                 pageId,
                 failureCount,
-                RefreshPolicy.nextRefreshAt(RefreshTargetKind.PAGE, failureCount, now),
+                RefreshPolicy.nextPageFailureAt(now, failureJitterSeconds()),
                 summarize(exception),
             )
             throw exception
@@ -89,4 +98,20 @@ class PageRefreshService(
     }
 
     private fun summarize(exception: RuntimeException): String = exception::class.simpleName ?: "refresh failure"
+
+    private fun logFailure(pageId: NotionPageId, exception: RuntimeException) {
+        val errorType = exception::class.simpleName ?: "RuntimeException"
+        val statusCode = when (exception) {
+            is RetryableNotionException -> exception.statusCode
+            is NotionAuthenticationException -> exception.statusCode
+            is NotionConfigurationException -> exception.statusCode
+            else -> null
+        }
+        val message = "Page refresh failed targetType={} targetId={} errorType={} statusCode={} detail={}"
+        if (exception is RetryableNotionException) {
+            logger.warn(message, "page", pageId.value, errorType, statusCode ?: "none", "none")
+        } else {
+            logger.error(message, "page", pageId.value, errorType, statusCode ?: "none", "none")
+        }
+    }
 }

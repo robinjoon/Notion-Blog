@@ -1,6 +1,7 @@
 package xyz.robinjoon.notionblog.config
 
 import java.time.Clock
+import java.time.Duration
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
@@ -62,17 +63,33 @@ class ApplicationConfiguration {
         store: TransactionalPageStore,
         clock: Clock,
         snapshotCodec: PageSnapshotCodec,
-    ): PageRefreshService = PageRefreshService(gateway, persistence, store, clock, snapshotCodec)
+        properties: BlogProperties,
+    ): PageRefreshService = PageRefreshService(
+        gateway,
+        persistence,
+        store,
+        clock,
+        snapshotCodec,
+        refreshInterval = Duration.ofMillis(properties.refresh.intervalMs),
+    )
 
     @Bean
     fun settingsRefreshService(
         gateway: NotionGateway,
         persistence: BlogPersistencePort,
         properties: NotionProperties,
+        blogProperties: BlogProperties,
         clock: Clock,
         store: TransactionalSettingsStore,
     ): SettingsRefreshService =
-        SettingsRefreshService(gateway, persistence, properties.settingsDataSourceId, clock, store)
+        SettingsRefreshService(
+            gateway,
+            persistence,
+            properties.settingsDataSourceId,
+            clock,
+            store,
+            refreshInterval = Duration.ofMillis(blogProperties.refresh.intervalMs),
+        )
 
     @Bean(destroyMethod = "shutdown")
     fun pageRefreshExecutor(properties: BlogProperties): ThreadPoolExecutor {

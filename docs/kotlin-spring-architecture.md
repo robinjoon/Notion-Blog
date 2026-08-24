@@ -265,18 +265,34 @@ domain  -> Kotlin/JDK only
 4. 수정된 공개 page이면 모든 block children 페이지를 재귀적으로 수집한다.
 5. Notion DTO를 정규화된 domain snapshot으로 변환한다.
 6. page, snapshot, route, 발견된 링크를 한 트랜잭션에서 반영한다.
-7. 실패하면 기존 snapshot을 보존하고 지수 backoff를 적용한다. 성공 시 기본 주기는 설정 1분, page 15분이다. 실패 추가 지연은 `5분 * 2^(failureCount-1)`이며 60분을 상한으로 한다.
+7. 성공한 설정과 page는 단일 정상 갱신 주기인 1분 뒤 다시 확인한다.
+8. page 갱신이 실패하면 기존 snapshot을 보존하고 실패 횟수와 무관하게 2분에 1~30초의 양의 random jitter를 더한 뒤 다시 시도한다.
+9. 설정 갱신 실패에는 `5분 * 2^(failureCount-1)`의 추가 지연을 적용하고 60분을 상한으로 한다.
 
 ### 9.5 스케줄링
 
 - `@Scheduled` 진입점은 due 대상 ID만 배치로 조회한다.
+- scheduler 실행과 성공한 page의 다음 metadata 확인은 같은 `blog.refresh.interval-ms` 값을 사용하며 기본값은 1분이다.
+- `refresh_after`는 가장 이른 갱신 가능 시각이며, 실제 시도 시각은 다음 scheduler 실행과 앞선 대상의 처리 시간만큼 늦어질 수 있다.
 - 실제 갱신은 HTTP lazy 수집과 같은 application service가 담당한다.
 - 같은 프로세스에서 동일 ID의 동시 갱신을 합친다.
 - Notion 호출 동시성은 작은 고정 값으로 제한한다.
+- scheduler의 due 대상 조회가 실패하면 operation과 안전한 예외 분류를 `ERROR`로 기록하고 다음 대상을 계속 처리한다.
+
+### 9.6 갱신 관측 가능성
+
+- 설정과 page 갱신 실패는 backoff 상태를 저장하는 application service가 시도당 한 번 기록한다.
+- 재시도 가능한 Notion 장애는 `WARN`, 인증·설정·내부 장애와 scheduler의 DB 대상 조회 실패는 `ERROR`로 기록한다.
+- 실패 로그에는 target 종류와 ID, 예외 종류, 가능한 경우 Notion HTTP status와 안전한 오류 요약을 포함한다. scheduler 조회 실패에는 operation도 포함한다.
+- 애플리케이션이 고정한 설정 검증 메시지만 로그의 안전한 오류 요약에 포함한다. 그 밖의 예외 메시지는 기록하지 않고 `last_error`는 예외 종류만 저장한다.
+- stack trace, token, credential, 원본 Notion 응답, 설정에 입력된 전체 URL은 로그와 `last_error`에 남기지 않는다.
+- Notion 갱신 실패는 기존 snapshot 제공과 readiness 상태에 영향을 주지 않는다.
 
 ## 10. Notion 경계
 
 - API version을 `NOTION_API_VERSION`으로 명시하고 배포 설정에서 고정한다.
+- page reference는 raw ID와 Notion의 `notion.com`, `notion.so`, `notion.site` 정식 호스트 및 하위 도메인 URL만 허용한다.
+- 정식 호스트 이름을 접두어나 접미어로 흉내 낸 lookalike host는 거부한다.
 - 모든 cursor 페이지를 수집한다.
 - block child 구조를 보존한다.
 - Notion API DTO는 adapter 밖으로 노출하지 않는다.
@@ -321,7 +337,7 @@ Notion HTTP 호출 중에는 DB 트랜잭션을 열어 두지 않는다. 먼저 
 - canonical 충돌과 안정적인 page ID suffix
 - 제목 변경 시 alias 전환
 - 공개/비공개 상태 전이
-- 갱신 시각과 실패 backoff
+- 단일 정상 갱신 시각, page의 2분+jitter 재시도, 설정 실패 backoff
 - Notion page link 추출과 내부 경로 변환
 
 ### 13.2 외부 경계 테스트

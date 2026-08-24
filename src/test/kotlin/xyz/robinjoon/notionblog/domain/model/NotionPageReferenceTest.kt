@@ -11,10 +11,20 @@ class NotionPageReferenceTest {
     }
 
     @Test
-    fun `extracts a page id only from notion hosts`() {
+    fun `extracts a page id only from supported Notion hosts`() {
         assertThat(NotionPageReference.parse("https://workspace.notion.site/My-page-0123456789abcdef0123456789abcdef"))
             .isEqualTo(NotionPageId("0123456789abcdef0123456789abcdef"))
+        assertThat(NotionPageReference.parse("https://app.notion.com/My-page-0123456789abcdef0123456789abcdef"))
+            .isEqualTo(NotionPageId("0123456789abcdef0123456789abcdef"))
+        assertThat(NotionPageReference.parse("https://notion.com/My-page-0123456789abcdef0123456789abcdef"))
+            .isEqualTo(NotionPageId("0123456789abcdef0123456789abcdef"))
         assertThat(NotionPageReference.parse("https://example.com/page-0123456789abcdef0123456789abcdef")).isNull()
+    }
+
+    @Test
+    fun `rejects lookalike hosts that merely contain a Notion domain`() {
+        assertThat(NotionPageReference.parse("https://app.notion.com.attacker.example/page-0123456789abcdef0123456789abcdef")).isNull()
+        assertThat(NotionPageReference.parse("https://evilnotion.com/page-0123456789abcdef0123456789abcdef")).isNull()
     }
 
     @Test
