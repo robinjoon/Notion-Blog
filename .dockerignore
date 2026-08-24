@@ -1,9 +1,12 @@
 .git
-.next
+build
+.gradle
+.kotlin
+.idea
 node_modules
-coverage
-test-results
-playwright-report
+.next
+out
+dist
 .env
 .env.*
-deploy/helm/**/*.tgz
+local.env

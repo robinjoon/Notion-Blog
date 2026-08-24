@@ -1,128 +1,92 @@
-# Notion-Blog Settings
+# Notion Blog Settings Data Source
 
-`SETTINGS_DATABASE_ID`는 `Notion-Blog Settings` 용도의 비공개 Notion 데이터베이스를 가리킵니다. 이 데이터베이스는 일반 블로그 콘텐츠가 아니라 사이트 설정 소스이며, 현재 구현은 Notion integration으로 `client.dataSources.query({ data_source_id: SETTINGS_DATABASE_ID })`를 호출해 row를 읽습니다.
+`NOTION_SETTINGS_DATA_SOURCE_ID`는 전역 블로그 설정을 저장하는 비공개 Notion data source ID입니다. 설정 source 자체는 공개하지 않고 Notion integration에만 공유합니다.
 
-일반 콘텐츠 페이지는 Notion public share와 `public_url`을 기준으로 공개 여부가 결정되지만, settings 데이터베이스 자체는 비공개여야 합니다. `header`와 `footer`는 현재 MVP에서 렌더링되지 않고, page ID를 파싱해 저장하고 refresh target으로 등록하는 예약 설정으로만 동작합니다.
+애플리케이션은 다음 endpoint를 cursor 끝까지 조회합니다.
 
-## Database Properties
-
-MVP는 아래 5개 속성을 전제로 `SettingsRow` 형태로 파싱합니다. 이 표는 "현재 구현이 기대하는 normalized row contract"를 설명합니다. 즉, 현재 코드는 Notion의 임의 raw property payload를 견고하게 해석하는 일반-purpose adapter가 아니라, query 결과를 `SettingsRow[]`로 간주하고 처리하는 MVP 가정 위에 서 있습니다.
-
-| Assumed property | Required | Parsed field | Type | Notes |
-| --- | --- | --- | --- | --- |
-| `Key` | yes | `key` | title | 고정 row key. `rootPage`, `header`, `footer`, `head` 중 하나를 사용합니다. |
-| `Kind` | yes | `kind` | select | `page` \| `blocks` \| `head` |
-| `Enabled` | yes | `enabled` | checkbox | `true` 인 row만 적용됩니다. |
-| `Page` | yes for page rows | `page` | url or rich text | Notion page URL 또는 page ID/reference |
-| `Data` | yes for head row | `data` | rich text or text | `head` row의 JSON 문자열 |
-
-코드 기준의 required row shape:
-
-```ts
-interface SettingsRow {
-  key: string;
-  kind: "page" | "blocks" | "head";
-  enabled: boolean;
-  page: string;
-  data: string;
-}
+```text
+POST /v1/data_sources/{dataSourceId}/query
 ```
 
-## Required Rows
+## Properties
+
+아래 property 이름을 사용합니다.
+
+| Property | Notion type | 설명 |
+|---|---|---|
+| `Key` | title | `rootPage`, `header`, `footer`, `head` 중 하나 |
+| `Kind` | select | `page`, `blocks`, `head` 중 하나 |
+| `Enabled` | checkbox | `true`인 첫 번째 동일 key row만 적용 |
+| `Page` | URL 또는 rich text | Notion page URL 또는 32자리 page ID |
+| `Data` | rich text | `head` row의 JSON object 문자열 |
+
+property 이름은 대소문자를 포함해 표와 같아야 합니다. `Kind` 값은 대소문자 차이를 허용하지만 표의 소문자 값을 권장합니다.
+
+## Rows
 
 ### `rootPage`
 
-- 필수 row입니다.
-- `Kind`는 `page`여야 합니다.
-- `Enabled`는 `true`여야 합니다.
-- `Page`에는 블로그의 `/` 경로로 렌더링할 Notion 페이지 URL 또는 page reference를 넣습니다.
-- 파싱에 실패하거나 비어 있으면 앱은 `settings rootPage is required` 오류를 냅니다.
+필수입니다.
 
-이 row가 가리키는 page ID가 `ParsedSettings.rootPageId`가 되고, 루트 라우트 `/`의 기준이 됩니다.
+```text
+Key     = rootPage
+Kind    = page
+Enabled = true
+Page    = 공개할 루트 Notion page URL 또는 page ID
+```
 
-### `header`
+유효한 `rootPage`가 없으면 설정 갱신은 실패합니다. 성공하면 이 page가 `/` route의 소유자가 되며, 설정 저장·page 발견·root route 교체는 같은 DB transaction에서 수행됩니다.
 
-- 선택 row입니다.
-- `Kind`는 `blocks`를 사용합니다.
-- `Page`에는 향후 전역 header 조각으로 쓸 수 있는 Notion 페이지 reference를 넣습니다.
-- 현재 MVP는 이 값을 파싱하고 저장하며 refresh target으로 등록하지만, layout/page에서 실제로 렌더링하지는 않습니다.
+일반 콘텐츠와 마찬가지로 실제 HTML을 제공하려면 해당 Notion page에 `public_url`이 있어야 합니다.
 
-### `footer`
+### `header`와 `footer`
 
-- 선택 row입니다.
-- `Kind`는 `blocks`를 사용합니다.
-- `Page`에는 향후 전역 footer 조각으로 쓸 수 있는 Notion 페이지 reference를 넣습니다.
-- 현재 MVP는 이 값을 파싱하고 저장하며 refresh target으로 등록하지만, layout/page에서 실제로 렌더링하지는 않습니다.
+선택입니다.
+
+```text
+Kind    = blocks
+Enabled = true
+Page    = Notion page URL 또는 page ID
+```
+
+현재 구현은 ID를 저장하고 갱신 대상으로 발견하지만 전역 layout fragment로 렌더링하지 않습니다. 향후 기능을 위한 예약 설정입니다.
 
 ### `head`
 
-- 선택 row입니다.
-- `Kind`는 `head`를 사용합니다.
-- `Data`에는 JSON 문자열을 저장합니다.
-- JSON이 아니거나 허용된 shape와 다르면 `settings head has invalid JSON` 오류를 냅니다.
+선택입니다.
 
-지원 필드는 아래와 같습니다.
+```text
+Kind    = head
+Enabled = true
+Data    = JSON object
+```
 
-```ts
-interface SiteHeadSettings {
-  language?: string;
-  siteName?: string;
-  defaultTitle?: string;
-  titleTemplate?: string;
-  defaultDescription?: string;
-  baseUrl?: string;
-  logoUrl?: string;
-  faviconUrl?: string;
-  ogTitle?: string;
-  ogDescription?: string;
-  ogImageUrl?: string;
-  ogType?: string;
-  twitterCard?: string;
-  twitterSite?: string;
-  robots?: string;
-  customCss?: string;
-  customHeadHtml?: string;
+현재 구현은 JSON object인지 검증해 PostgreSQL JSONB에 저장합니다. raw HTML과 `customHeadHtml`은 보안상 렌더링하지 않으며, 저장된 head 설정을 페이지별 metadata에 적용하는 기능도 아직 활성화하지 않았습니다.
+
+예시:
+
+```json
+{
+  "siteName": "Notion Blog",
+  "defaultDescription": "기술과 배움을 기록합니다."
 }
 ```
 
-현재 MVP에서 실제 반영되는 값:
-
-- `language`
-- `siteName`
-- `defaultTitle`
-- `titleTemplate`
-- `defaultDescription`
-- `baseUrl`
-- `faviconUrl`
-- `ogTitle`
-- `ogDescription`
-- `ogImageUrl`
-- `ogType`
-- `twitterCard`
-- `twitterSite`
-- `robots`
-- `customCss`
-
-주의사항:
-
-- `logoUrl`과 `customHeadHtml`은 저장은 되지만 현재 MVP 렌더러에서는 직접 사용하지 않습니다.
-- 특히 `customHeadHtml`은 raw HTML을 그대로 렌더링하지 않습니다. 나중에 sanitize 또는 allowlist 정책이 생기기 전까지는 저장만 하고 출력하지 않는 값으로 봐야 합니다.
-
-## Example Rows
-
-아래처럼 구성하면 현재 구현과 맞습니다.
+## Example
 
 | Key | Kind | Enabled | Page | Data |
-| --- | --- | --- | --- | --- |
-| `rootPage` | `page` | `true` | `https://www.notion.so/Root-0123456789abcdef0123456789abcdef` | `""` |
-| `header` | `blocks` | `true` | `11111111111111111111111111111111` | `""` |
-| `footer` | `blocks` | `true` | `22222222222222222222222222222222` | `""` |
-| `head` | `head` | `true` | `""` | `{"siteName":"Notion-Blog","defaultTitle":"Blog"}` |
+|---|---|---:|---|---|
+| `rootPage` | `page` | true | `https://www.notion.so/Root-0123456789abcdef0123456789abcdef` |  |
+| `header` | `blocks` | true | `11111111111111111111111111111111` |  |
+| `footer` | `blocks` | true | `22222222222222222222222222222222` |  |
+| `head` | `head` | true |  | `{"siteName":"Notion Blog"}` |
 
-## Operational Notes
+## Operational Rules
 
-- `SETTINGS_DATABASE_ID`가 유일한 settings 환경 식별자입니다.
-- root page 선택은 별도 env var가 아니라 settings 데이터베이스의 `rootPage` row에서 읽습니다.
-- settings sync가 끝나면 앱은 `rootPage`, `header`, `footer`가 가리키는 page ID를 refresh target으로 등록합니다.
-- `header`와 `footer`는 현재 MVP에서 rendered fragment가 아니라, parsed/stored/refreshed only 상태의 예약 설정입니다.
-- 일반 콘텐츠 페이지는 Notion `public_url`이 있을 때만 공개 서빙 대상이 됩니다.
+- root page는 환경변수가 아니라 `rootPage` row에서 선택합니다.
+- 명시적인 Notion page link로 발견된 ID만 lazy 수집 경로에서 허용됩니다.
+- 공개 page는 Notion `public_url`이 있을 때만 route와 snapshot을 제공합니다.
+- 설정 갱신과 page metadata 확인은 단일 정상 주기를 사용하며 기본값은 1분입니다.
+- page 갱신 실패 시에는 2분에 1~30초의 random jitter를 더한 뒤 다시 시도합니다.
+- 설정 갱신 실패의 추가 지연은 5분부터 지수 증가하고 60분에서 제한됩니다.
+- Notion API version은 `NOTION_API_VERSION`으로 고정합니다.

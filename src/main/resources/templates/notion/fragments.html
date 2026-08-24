@@ -1,0 +1,149 @@
+<th:block th:fragment="blocks(items)">
+    <th:block th:each="block : ${items}">
+        <th:block th:replace="~{notion/fragments :: block(${block})}"></th:block>
+    </th:block>
+</th:block>
+
+<th:block th:fragment="richText(tokens)">
+    <th:block th:each="token : ${tokens}">
+        <a th:if="${token.href != null}" th:href="${token.href}" th:utext="${token.markup}">text</a>
+        <th:block th:unless="${token.href != null}" th:utext="${token.markup}"></th:block>
+    </th:block>
+</th:block>
+
+<th:block th:fragment="children(block)">
+    <th:block th:if="${!#lists.isEmpty(block.children)}">
+        <div class="notion-children">
+            <th:block th:replace="~{notion/fragments :: blocks(${block.children})}"></th:block>
+        </div>
+    </th:block>
+</th:block>
+
+<th:block th:fragment="caption(block)">
+    <figcaption th:if="${!#lists.isEmpty(block.caption)}">
+        <th:block th:replace="~{notion/fragments :: richText(${block.caption})}"></th:block>
+    </figcaption>
+</th:block>
+
+<th:block th:fragment="block(block)">
+    <th:block th:if="${block.kind == 'list'}">
+        <ul th:if="${block.listKind == 'bulleted' or block.listKind == 'todo'}"
+            class="notion-block notion-list"
+            th:classappend="${block.listKind == 'todo' ? ' notion-list-todo' : ''}">
+            <li th:each="item : ${block.items}">
+                <th:block th:replace="~{notion/fragments :: block(${item})}"></th:block>
+            </li>
+        </ul>
+        <ol th:if="${block.listKind == 'numbered'}" class="notion-block notion-list">
+            <li th:each="item : ${block.items}">
+                <th:block th:replace="~{notion/fragments :: block(${item})}"></th:block>
+            </li>
+        </ol>
+    </th:block>
+
+    <th:block th:if="${block.kind == 'paragraph'}">
+        <div class="notion-block">
+            <p><th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block></p>
+            <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+        </div>
+    </th:block>
+
+    <h1 th:if="${block.kind == 'heading_1'}" class="notion-block notion-heading-1">
+        <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+    </h1>
+    <h2 th:if="${block.kind == 'heading_2'}" class="notion-block notion-heading-2">
+        <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+    </h2>
+    <h3 th:if="${block.kind == 'heading_3'}" class="notion-block notion-heading-3">
+        <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+    </h3>
+
+    <th:block th:if="${block.kind == 'heading_1' or block.kind == 'heading_2' or block.kind == 'heading_3'}">
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </th:block>
+
+    <th:block th:if="${block.kind == 'bulleted_list_item' or block.kind == 'numbered_list_item'}">
+        <div class="notion-block">
+            <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+            <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+        </div>
+    </th:block>
+
+    <label th:if="${block.kind == 'to_do'}" class="notion-block notion-to-do">
+        <input type="checkbox" readonly aria-label="Notion to-do item" th:checked="${block.checked}">
+        <span><th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block></span>
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </label>
+
+    <details th:if="${block.kind == 'toggle'}" class="notion-block notion-toggle">
+        <summary><th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block></summary>
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </details>
+
+    <blockquote th:if="${block.kind == 'quote'}" class="notion-block notion-quote">
+        <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </blockquote>
+
+    <div th:if="${block.kind == 'callout'}" class="notion-block notion-callout">
+        <div aria-hidden="true" th:text="${block.icon}">!</div>
+        <div>
+            <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+            <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+        </div>
+    </div>
+
+    <hr th:if="${block.kind == 'divider'}" class="notion-block notion-divider">
+
+    <pre th:if="${block.kind == 'code'}" class="notion-block notion-code"
+         th:classappend="${' language-' + block.language}"><code>
+        <th:block th:replace="~{notion/fragments :: richText(${block.richText})}"></th:block>
+    </code></pre>
+    <th:block th:if="${block.kind == 'code'}" th:replace="~{notion/fragments :: caption(${block})}"></th:block>
+
+    <figure th:if="${block.kind == 'image'}" class="notion-block notion-image">
+        <img th:if="${block.url != null}" th:src="${block.url}" alt="" class="notion-image-element">
+        <th:block th:replace="~{notion/fragments :: caption(${block})}"></th:block>
+    </figure>
+    <figure th:if="${block.kind == 'video'}" class="notion-block notion-video">
+        <a th:if="${block.url != null}" th:href="${block.url}">Video</a>
+        <th:block th:replace="~{notion/fragments :: caption(${block})}"></th:block>
+    </figure>
+    <figure th:if="${block.kind == 'file'}" class="notion-block notion-file">
+        <a th:if="${block.url != null}" th:href="${block.url}" th:text="${block.fileName}">File</a>
+        <th:block th:replace="~{notion/fragments :: caption(${block})}"></th:block>
+    </figure>
+
+    <div th:if="${block.kind == 'bookmark'}" class="notion-block notion-bookmark">
+        <a th:if="${block.url != null}" th:href="${block.url}" th:text="${block.url}">Bookmark</a>
+        <th:block th:replace="~{notion/fragments :: caption(${block})}"></th:block>
+    </div>
+
+    <div th:if="${block.kind == 'table'}" class="notion-block notion-table-wrapper">
+        <table class="notion-table"><tbody>
+            <tr th:each="row : ${block.rows}">
+                <td th:each="cell : ${row.cells}">
+                    <th:block th:replace="~{notion/fragments :: richText(${cell})}"></th:block>
+                </td>
+            </tr>
+        </tbody></table>
+    </div>
+
+    <div th:if="${block.kind == 'table_row'}" class="notion-block notion-table-row">
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </div>
+
+    <div th:if="${block.kind == 'column'}" class="notion-column">
+        <th:block th:replace="~{notion/fragments :: blocks(${block.children})}"></th:block>
+    </div>
+
+    <div th:if="${block.kind == 'child_page'}" class="notion-block notion-child-page">
+        <a th:href="${block.url}" th:text="${block.title}">Child page</a>
+        <th:block th:replace="~{notion/fragments :: children(${block})}"></th:block>
+    </div>
+
+    <div th:if="${block.kind == 'unsupported'}" class="notion-unsupported"
+         th:text="${'Unsupported Notion block: ' + block.unsupportedType}">
+        Unsupported Notion block
+    </div>
+</th:block>

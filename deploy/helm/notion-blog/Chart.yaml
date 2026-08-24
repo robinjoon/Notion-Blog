@@ -1,6 +1,0 @@
-apiVersion: v2
-name: notion-blog
-description: Helm chart for the Notion-Blog MVP web, worker, and migration workloads.
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

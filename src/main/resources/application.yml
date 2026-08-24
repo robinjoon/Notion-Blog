@@ -1,0 +1,38 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: notion-blog
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  exposed:
+    generate-ddl: false
+
+notion:
+  token: ${NOTION_TOKEN}
+  settings-data-source-id: ${NOTION_SETTINGS_DATA_SOURCE_ID}
+  api-version: ${NOTION_API_VERSION}
+  base-url: ${NOTION_BASE_URL:https://api.notion.com/v1}
+  request-timeout: ${NOTION_REQUEST_TIMEOUT:10s}
+  collection-timeout: ${NOTION_COLLECTION_TIMEOUT:30s}
+
+blog:
+  base-url: ${BLOG_BASE_URL}
+  refresh:
+    enabled: ${BLOG_REFRESH_ENABLED:true}
+    interval-ms: ${BLOG_REFRESH_INTERVAL_MS:${BLOG_REFRESH_FIXED_DELAY_MS:60000}}
+    thread-count: ${BLOG_REFRESH_THREAD_COUNT:2}
+    queue-capacity: ${BLOG_REFRESH_QUEUE_CAPACITY:32}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info
