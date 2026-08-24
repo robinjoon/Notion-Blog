@@ -112,6 +112,29 @@ Runtime container는 UID/GID `10001`로 실행됩니다. read-only root filesyst
 
 외부 하네스에는 생성한 image와 [Configuration](#configuration)의 환경변수를 전달하면 됩니다. 애플리케이션은 `8080` 포트와 `/actuator/health/liveness`, `/actuator/health/readiness` endpoint를 제공합니다. 현재 scheduler는 다중 인스턴스 조정을 하지 않으므로 동시에 scheduler를 활성화하는 인스턴스는 하나여야 합니다.
 
+### Home k3s delivery
+
+GitHub Actions는 pull request에서 Gradle build만 검증합니다. `master` push 또는 `master` ref의 수동 실행에서는 검증을 통과한 `linux/amd64` 이미지를 다음 형식의 불변 태그로 홈 Zot 레지스트리에 게시합니다. 아직 기본 브랜치에 병합되지 않은 최초 배포만 예약된 `bootstrap-homelab` tag로 시작합니다.
+
+```text
+registry.homelab.robinjoon.xyz/apps/notion-blog:sha-<full-git-sha>-run-<run-id>-<attempt>
+```
+
+재실행도 기존 tag를 덮어쓰지 않도록 Actions run ID와 attempt를 tag에 포함합니다. CI는 image 게시까지만 담당합니다. 배포 하네스 변경은 `/Users/imsubin/IdeaProjects/Simple-K3S-Herness`에서 별도 Codex 세션으로 하네스 CLI를 사용해 수행하고, Argo CD가 하네스 `main`을 동기화합니다.
+
+필요한 GitHub Actions 설정:
+
+```text
+Variable: HOMELAB_REGISTRY_HOST
+Variable: HOMELAB_REGISTRY_IMAGE
+Secret:   HOMELAB_REGISTRY_USERNAME
+Secret:   HOMELAB_REGISTRY_PASSWORD
+```
+
+최초 배포용 `bootstrap-homelab` tag는 저장소의 유일한 관리자가 한 번만 생성하며, 수동 게시 작업은 `master` ref에서만 허용합니다.
+
+Notion runtime 값은 별도의 GitHub Actions Secret `NOTION_TOKEN`, `NOTION_SETTINGS_DATA_SOURCE_ID`에도 보관합니다. 이 두 값은 image build에 전달하지 않으며, k3s runtime Secret은 하네스 밖의 운영 절차로 주입합니다. DB 자격 증명은 k3s에만 유지합니다.
+
 ## Runtime Behavior
 
 - `/`: 설정의 `rootPage`를 렌더링합니다.

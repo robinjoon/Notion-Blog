@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - bootstrap-homelab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 25
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Build and test
+        run: ./gradlew build --no-daemon
+
+  publish:
+    name: Publish image
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: notion-blog-homelab-publish
+      cancel-in-progress: false
+    env:
+      REGISTRY_HOST: ${{ vars.HOMELAB_REGISTRY_HOST }}
+      REGISTRY_IMAGE: ${{ vars.HOMELAB_REGISTRY_IMAGE }}
+      IMAGE_TAG: sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate publish configuration
+        env:
+          REGISTRY_USERNAME: ${{ secrets.HOMELAB_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.HOMELAB_REGISTRY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REGISTRY_HOST REGISTRY_IMAGE REGISTRY_USERNAME REGISTRY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::${name} is not configured"
+              exit 1
+            fi
+          done
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Log in to the home registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY_HOST }}
+          username: ${{ secrets.HOMELAB_REGISTRY_USERNAME }}
+          password: ${{ secrets.HOMELAB_REGISTRY_PASSWORD }}
+      - name: Build and push immutable image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY_HOST }}/${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
