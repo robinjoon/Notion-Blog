@@ -12,57 +12,177 @@ class ApplicationPropertiesTest {
         .withUserConfiguration(PropertiesConfiguration::class.java)
 
     @Test
-    fun `binds Notion and blog runtime settings to typed properties`() {
+    fun `binds typed synchronization and deployed presentation asset settings`() {
         contextRunner
-            .withPropertyValues(
-                "notion.token=test-token",
-                "notion.settings-data-source-id=settings-data-source",
-                "notion.api-version=2025-09-03",
-                "notion.base-url=https://api.notion.test/v1",
-                "notion.request-timeout=4s",
-                "notion.collection-timeout=20s",
-                "blog.base-url=https://blog.example.com",
-                "blog.refresh.enabled=false",
-                "blog.refresh.interval-ms=45000",
-                "blog.refresh.thread-count=3",
-                "blog.refresh.queue-capacity=24",
-            )
+            .withPropertyValues(*validProperties())
             .run { context ->
                 assertThat(context).hasNotFailed()
 
                 val notion = context.getBean(NotionProperties::class.java)
-                assertThat(notion.token).isEqualTo("test-token")
-                assertThat(notion.settingsDataSourceId).isEqualTo("settings-data-source")
-                assertThat(notion.apiVersion).isEqualTo("2025-09-03")
-                assertThat(notion.baseUrl).isEqualTo("https://api.notion.test/v1")
+                assertThat(notion.sourceId).isEqualTo("notion")
+                assertThat(notion.apiVersion).isEqualTo("2026-03-11")
+                assertThat(notion.maxBlockDepth).isEqualTo(12)
+                assertThat(notion.maxBlockCount).isEqualTo(4_000)
                 assertThat(notion.requestTimeout).isEqualTo(Duration.ofSeconds(4))
-                assertThat(notion.collectionTimeout).isEqualTo(Duration.ofSeconds(20))
 
                 val blog = context.getBean(BlogProperties::class.java)
-                assertThat(blog.baseUrl.toString()).isEqualTo("https://blog.example.com")
-                assertThat(blog.refresh.enabled).isFalse()
-                assertThat(blog.refresh.intervalMs).isEqualTo(45_000)
-                assertThat(blog.refresh.threadCount).isEqualTo(3)
-                assertThat(blog.refresh.queueCapacity).isEqualTo(24)
+                assertThat(blog.synchronization.enabled).isFalse()
+                assertThat(blog.synchronization.intervalMs).isEqualTo(45_000)
+                assertThat(blog.synchronization.dueBatchSize).isEqualTo(24)
+                assertThat(blog.synchronization.successInterval).isEqualTo(Duration.ofMinutes(5))
+                assertThat(blog.presentation.defaultProfileKey).isEqualTo("notion-default")
+                val asset = blog.presentation.assets.single()
+                assertThat(asset.key).isEqualTo("notion-core")
+                assertThat(asset.version).isEqualTo(1)
+                assertThat(asset.current).isTrue()
             }
     }
 
     @Test
-    fun `does not provide a default Notion token`() {
+    fun `uses the configured Notion source identifier default`() {
         contextRunner
-            .withPropertyValues(
-                "notion.settings-data-source-id=settings-data-source",
-                "notion.api-version=2025-09-03",
-                "notion.base-url=https://api.notion.test/v1",
-                "notion.request-timeout=4s",
-                "notion.collection-timeout=20s",
-                "blog.base-url=https://blog.example.com",
-            )
+            .withPropertyValues(*validProperties().filterNot { it.startsWith("notion.source-id=") }.toTypedArray())
             .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasMessageContaining("notion")
+                assertThat(context).hasNotFailed()
+                assertThat(context.getBean(NotionProperties::class.java).sourceId).isEqualTo("notion")
             }
     }
+
+    @Test
+    fun `uses safe Notion and synchronization defaults when only required secrets are supplied`() {
+        contextRunner
+            .withPropertyValues(
+                "notion.token=test-token",
+                "notion.settings-data-source-id=settings-data-source",
+            )
+            .run { context ->
+                assertThat(context).hasNotFailed()
+                val notion = context.getBean(NotionProperties::class.java)
+                assertThat(notion.apiVersion).isEqualTo("2026-03-11")
+                assertThat(notion.maxBlockDepth).isEqualTo(32)
+                assertThat(notion.maxBlockCount).isEqualTo(10_000)
+                assertThat(context.getBean(BlogProperties::class.java).synchronization.dueBatchSize).isEqualTo(100)
+            }
+    }
+
+    @Test
+    fun `rejects a missing Notion token`() {
+        contextRunner
+            .withPropertyValues(*validProperties().filterNot { it.startsWith("notion.token=") }.toTypedArray())
+            .run { context ->
+                assertThat(context).hasFailed()
+            }
+    }
+
+    @Test
+    fun `rejects an unsupported Notion API version`() {
+        contextRunner
+            .withPropertyValues(*validProperties("notion.api-version=2025-09-03"))
+            .run { context ->
+                assertThat(context).hasFailed()
+            }
+    }
+
+    @Test
+    fun `rejects invalid synchronization and Notion collection limits`() {
+        listOf(
+            "notion.max-block-depth=0",
+            "notion.max-block-count=0",
+            "notion.request-timeout=0s",
+            "blog.synchronization.interval-ms=0",
+            "blog.synchronization.due-batch-size=0",
+            "blog.synchronization.success-interval=0s",
+            "blog.synchronization.maximum-failure-delay=1s",
+        ).forEach { invalidProperty ->
+            contextRunner
+                .withPropertyValues(*validProperties(invalidProperty))
+                .run { context -> assertThat(context).hasFailed() }
+        }
+    }
+
+    @Test
+    fun `rejects duplicate exact assets and multiple current assets for one key`() {
+        val duplicate = arrayOf(
+            "blog.presentation.assets[1].key=notion-core",
+            "blog.presentation.assets[1].version=1",
+            "blog.presentation.assets[1].integrity=sha384-core",
+            "blog.presentation.assets[1].public-path=/presentation/notion/v1/duplicate.css",
+            "blog.presentation.assets[1].media-type=text/css",
+            "blog.presentation.assets[1].current=false",
+        )
+        contextRunner.withPropertyValues(*validProperties(*duplicate)).run { context ->
+            assertThat(context).hasFailed()
+        }
+
+        val duplicateCurrent = arrayOf(
+            "blog.presentation.assets[1].key=notion-core",
+            "blog.presentation.assets[1].version=2",
+            "blog.presentation.assets[1].integrity=sha384-core-v2",
+            "blog.presentation.assets[1].public-path=/presentation/notion/v2/notion.css",
+            "blog.presentation.assets[1].media-type=text/css",
+            "blog.presentation.assets[1].current=true",
+        )
+        contextRunner.withPropertyValues(*validProperties(*duplicateCurrent)).run { context ->
+            assertThat(context).hasFailed()
+        }
+    }
+
+    @Test
+    fun `rejects assets that reuse a key and version with a different integrity`() {
+        val duplicateLogicalIdentity = arrayOf(
+            "blog.presentation.assets[1].key=notion-core",
+            "blog.presentation.assets[1].version=1",
+            "blog.presentation.assets[1].integrity=sha384-core-replaced",
+            "blog.presentation.assets[1].public-path=/presentation/notion/v1/replaced.css",
+            "blog.presentation.assets[1].media-type=text/css",
+            "blog.presentation.assets[1].current=false",
+        )
+
+        contextRunner.withPropertyValues(*validProperties(*duplicateLogicalIdentity)).run { context ->
+            assertThat(context).hasFailed()
+        }
+    }
+
+    @Test
+    fun `allows different versions for the same asset key when only one is current`() {
+        val olderVersion = arrayOf(
+            "blog.presentation.assets[1].key=notion-core",
+            "blog.presentation.assets[1].version=2",
+            "blog.presentation.assets[1].integrity=sha384-core-v2",
+            "blog.presentation.assets[1].public-path=/presentation/notion/v2/notion.css",
+            "blog.presentation.assets[1].media-type=text/css",
+            "blog.presentation.assets[1].current=false",
+        )
+
+        contextRunner.withPropertyValues(*validProperties(*olderVersion)).run { context ->
+            assertThat(context).hasNotFailed()
+        }
+    }
+
+    private fun validProperties(vararg overrides: String): Array<String> = arrayOf(
+        "notion.token=test-token",
+        "notion.settings-data-source-id=settings-data-source",
+        "notion.api-version=2026-03-11",
+        "notion.base-url=https://api.notion.test/v1",
+        "notion.request-timeout=4s",
+        "notion.collection-timeout=20s",
+        "notion.max-block-depth=12",
+        "notion.max-block-count=4000",
+        "blog.synchronization.enabled=false",
+        "blog.synchronization.interval-ms=45000",
+        "blog.synchronization.due-batch-size=24",
+        "blog.synchronization.success-interval=5m",
+        "blog.synchronization.initial-failure-delay=5s",
+        "blog.synchronization.maximum-failure-delay=1m",
+        "blog.presentation.default-profile-key=notion-default",
+        "blog.presentation.assets[0].key=notion-core",
+        "blog.presentation.assets[0].version=1",
+        "blog.presentation.assets[0].integrity=sha384-core",
+        "blog.presentation.assets[0].public-path=/presentation/notion/v1/notion.css",
+        "blog.presentation.assets[0].media-type=text/css",
+        "blog.presentation.assets[0].current=true",
+        *overrides,
+    )
 
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(NotionProperties::class, BlogProperties::class)

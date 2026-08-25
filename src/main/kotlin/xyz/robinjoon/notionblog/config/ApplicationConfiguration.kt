@@ -1,123 +1,149 @@
 package xyz.robinjoon.notionblog.config
 
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import xyz.robinjoon.notionblog.adapter.out.notion.NotionRestClientAdapter
-import xyz.robinjoon.notionblog.adapter.out.persistence.ExposedBlogPersistenceAdapter
-import xyz.robinjoon.notionblog.adapter.out.persistence.TaggedPageSnapshotCodec
-import xyz.robinjoon.notionblog.application.port.`in`.RefreshPageUseCase
-import xyz.robinjoon.notionblog.application.port.out.notion.NotionGateway
-import xyz.robinjoon.notionblog.application.port.out.persistence.BlogPersistencePort
-import xyz.robinjoon.notionblog.application.port.out.persistence.PageSnapshotCodec
-import xyz.robinjoon.notionblog.application.service.AsyncPageRefreshRequester
-import xyz.robinjoon.notionblog.application.service.PageAccessService
-import xyz.robinjoon.notionblog.application.service.PageRefreshRequester
-import xyz.robinjoon.notionblog.application.service.PageRefreshService
-import xyz.robinjoon.notionblog.application.service.SettingsRefreshService
-import xyz.robinjoon.notionblog.application.service.TransactionalPageStore
-import xyz.robinjoon.notionblog.application.service.TransactionalSettingsStore
+import xyz.robinjoon.notionblog.adapter.input.web.PostPageViewAssembler
+import xyz.robinjoon.notionblog.adapter.output.notion.NotionPostSource
+import xyz.robinjoon.notionblog.adapter.output.notion.NotionSiteConfigurationSource
+import xyz.robinjoon.notionblog.adapter.output.notion.client.NotionApiClient
+import xyz.robinjoon.notionblog.adapter.output.persistence.exposed.ExposedPostRepository
+import xyz.robinjoon.notionblog.adapter.output.persistence.exposed.ExposedPublicationRepository
+import xyz.robinjoon.notionblog.adapter.output.persistence.exposed.ExposedSiteConfigurationRepository
+import xyz.robinjoon.notionblog.adapter.output.persistence.exposed.ExposedSyncStateRepository
+import xyz.robinjoon.notionblog.adapter.output.persistence.snapshot.JsonBlockTreeSnapshotCodec
+import xyz.robinjoon.notionblog.adapter.output.presentation.ClasspathPresentationAssetCatalog
+import xyz.robinjoon.notionblog.application.model.PresentationAssetDescriptor
+import xyz.robinjoon.notionblog.application.port.output.persistence.PostRepository
+import xyz.robinjoon.notionblog.application.port.output.persistence.PublicationRepository
+import xyz.robinjoon.notionblog.application.port.output.persistence.SiteConfigurationRepository
+import xyz.robinjoon.notionblog.application.port.output.persistence.SyncStateRepository
+import xyz.robinjoon.notionblog.application.port.output.presentation.PresentationAssetCatalog
+import xyz.robinjoon.notionblog.application.service.ApplyImportedSiteConfigurationService
+import xyz.robinjoon.notionblog.application.service.GetPublishedPostService
+import xyz.robinjoon.notionblog.application.service.ResolvePostLinksService
+import xyz.robinjoon.notionblog.domain.post.PostId
+import xyz.robinjoon.notionblog.domain.publication.PublicationId
+import xyz.robinjoon.notionblog.domain.publication.PublicationRevisionId
+import xyz.robinjoon.notionblog.domain.site.PresentationAssetRef
+import xyz.robinjoon.notionblog.domain.site.PresentationProfileKey
+import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
+import xyz.robinjoon.notionblog.domain.source.SourceId
+import xyz.robinjoon.notionblog.domain.sync.RefreshPolicy
 import java.time.Clock
-import java.time.Duration
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.UUID
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(NotionProperties::class, BlogProperties::class)
-class ApplicationConfiguration {
+internal class ApplicationConfiguration {
     @Bean
     fun clock(): Clock = Clock.systemUTC()
 
     @Bean
-    fun blogPersistence(): ExposedBlogPersistenceAdapter = ExposedBlogPersistenceAdapter()
+    fun refreshPolicy(properties: BlogProperties): RefreshPolicy = RefreshPolicy(
+        successInterval = properties.synchronization.successInterval,
+        initialFailureDelay = properties.synchronization.initialFailureDelay,
+        maximumFailureDelay = properties.synchronization.maximumFailureDelay,
+    )
 
     @Bean
-    fun pageSnapshotCodec(): TaggedPageSnapshotCodec = TaggedPageSnapshotCodec()
+    fun jsonBlockTreeSnapshotCodec(): JsonBlockTreeSnapshotCodec = JsonBlockTreeSnapshotCodec()
 
     @Bean
-    fun notionGateway(properties: NotionProperties): NotionRestClientAdapter = NotionRestClientAdapter(
+    fun postRepository(snapshotCodec: JsonBlockTreeSnapshotCodec): ExposedPostRepository = ExposedPostRepository(snapshotCodec)
+
+    @Bean
+    fun publicationRepository(): ExposedPublicationRepository = ExposedPublicationRepository()
+
+    @Bean
+    fun siteConfigurationRepository(): ExposedSiteConfigurationRepository = ExposedSiteConfigurationRepository()
+
+    @Bean
+    fun syncStateRepository(): ExposedSyncStateRepository = ExposedSyncStateRepository()
+
+    @Bean
+    internal fun notionApiClient(properties: NotionProperties): NotionApiClient = NotionApiClient(
         baseUrl = properties.baseUrl,
         token = properties.token,
-        apiVersion = properties.apiVersion,
         requestTimeout = properties.requestTimeout,
-        totalCollectionTimeout = properties.collectionTimeout,
+        collectionTimeout = properties.collectionTimeout,
     )
 
     @Bean
-    fun transactionalPageStore(persistence: BlogPersistencePort): TransactionalPageStore = TransactionalPageStore(persistence)
-
-    @Bean
-    fun transactionalSettingsStore(persistence: BlogPersistencePort): TransactionalSettingsStore = TransactionalSettingsStore(persistence)
-
-    @Bean
-    fun pageRefreshService(
-        gateway: NotionGateway,
-        persistence: BlogPersistencePort,
-        store: TransactionalPageStore,
-        clock: Clock,
-        snapshotCodec: PageSnapshotCodec,
-        properties: BlogProperties,
-    ): PageRefreshService = PageRefreshService(
-        gateway,
-        persistence,
-        store,
-        clock,
-        snapshotCodec,
-        refreshInterval = Duration.ofMillis(properties.refresh.intervalMs),
+    internal fun postSource(properties: NotionProperties, client: NotionApiClient): NotionPostSource = NotionPostSource(
+        sourceId = SourceId(properties.sourceId),
+        client = client,
+        maxDepth = properties.maxBlockDepth,
+        maxBlockCount = properties.maxBlockCount,
+        collectionTimeout = properties.collectionTimeout,
     )
 
     @Bean
-    fun settingsRefreshService(
-        gateway: NotionGateway,
-        persistence: BlogPersistencePort,
-        properties: NotionProperties,
-        blogProperties: BlogProperties,
-        clock: Clock,
-        store: TransactionalSettingsStore,
-    ): SettingsRefreshService = SettingsRefreshService(
-        gateway,
-        persistence,
-        properties.settingsDataSourceId,
-        clock,
-        store,
-        refreshInterval = Duration.ofMillis(blogProperties.refresh.intervalMs),
+    internal fun siteConfigurationSource(properties: NotionProperties, client: NotionApiClient): NotionSiteConfigurationSource = NotionSiteConfigurationSource(
+        sourceId = SourceId(properties.sourceId),
+        settingsDataSourceId = properties.settingsDataSourceId,
+        client = client,
     )
 
-    @Bean(destroyMethod = "shutdown")
-    fun pageRefreshExecutor(properties: BlogProperties): ThreadPoolExecutor {
-        val threadCount = properties.refresh.threadCount
-        return ThreadPoolExecutor(
-            threadCount,
-            threadCount,
-            0,
-            TimeUnit.MILLISECONDS,
-            ArrayBlockingQueue(properties.refresh.queueCapacity),
-            PageRefreshThreadFactory(),
-            ThreadPoolExecutor.DiscardPolicy(),
-        )
+    @Bean
+    fun presentationAssetCatalog(properties: BlogProperties): ClasspathPresentationAssetCatalog {
+        val references = properties.presentation.assets.associate { asset ->
+            val reference = PresentationAssetRef(asset.key, asset.version, asset.integrity)
+            reference to PresentationAssetDescriptor(asset.publicPath, asset.mediaType, asset.integrity)
+        }
+        val currentReferences = properties.presentation.assets
+            .filter(BlogProperties.Asset::current)
+            .associate { asset ->
+                asset.key to PresentationAssetRef(asset.key, asset.version, asset.integrity)
+            }
+        return ClasspathPresentationAssetCatalog(references, currentReferences)
     }
 
     @Bean
-    fun pageRefreshRequester(
-        refresh: RefreshPageUseCase,
-        @Qualifier("pageRefreshExecutor") executor: ThreadPoolExecutor,
-    ): AsyncPageRefreshRequester = AsyncPageRefreshRequester(refresh, executor)
+    fun getPublishedPostService(
+        publications: PublicationRepository,
+        posts: PostRepository,
+    ): GetPublishedPostService = GetPublishedPostService(publications, posts)
 
     @Bean
-    fun pageAccessService(
-        persistence: BlogPersistencePort,
-        pageRefresh: PageRefreshRequester,
+    fun resolvePostLinksService(
+        posts: PostRepository,
+        publications: PublicationRepository,
+    ): ResolvePostLinksService = ResolvePostLinksService(posts, publications)
+
+    @Bean
+    fun postPageViewAssembler(clock: Clock): PostPageViewAssembler = PostPageViewAssembler(clock)
+
+    @Bean
+    fun postIdFactory(): (SourceDocumentRef) -> PostId = { PostId(UUID.randomUUID()) }
+
+    @Bean
+    fun publicationIdFactory(): () -> PublicationId = { PublicationId(UUID.randomUUID()) }
+
+    @Bean
+    fun revisionIdFactory(): () -> PublicationRevisionId = { PublicationRevisionId(UUID.randomUUID()) }
+
+    @Bean
+    fun defaultPresentationProfileKey(properties: BlogProperties): PresentationProfileKey = PresentationProfileKey(properties.presentation.defaultProfileKey)
+
+    @Bean
+    fun applyImportedSiteConfigurationService(
+        sites: SiteConfigurationRepository,
+        publications: PublicationRepository,
+        assets: PresentationAssetCatalog,
+        states: SyncStateRepository,
         clock: Clock,
-        snapshotCodec: PageSnapshotCodec,
-    ): PageAccessService = PageAccessService(persistence, pageRefresh, clock, snapshotCodec)
-}
-
-private class PageRefreshThreadFactory : ThreadFactory {
-    private val sequence = AtomicInteger()
-
-    override fun newThread(task: Runnable): Thread = Thread(task, "page-refresh-${sequence.incrementAndGet()}").apply { isDaemon = true }
+        refreshPolicy: RefreshPolicy,
+        defaultProfileKey: PresentationProfileKey,
+        publicationIdFactory: () -> PublicationId,
+    ): ApplyImportedSiteConfigurationService = ApplyImportedSiteConfigurationService(
+        siteConfigurationRepository = sites,
+        publicationRepository = publications,
+        presentationAssetCatalog = assets,
+        syncStateRepository = states,
+        clock = clock,
+        refreshPolicy = refreshPolicy,
+        defaultPresentationProfileKey = defaultProfileKey,
+        publicationIdFactory = publicationIdFactory,
+    )
 }

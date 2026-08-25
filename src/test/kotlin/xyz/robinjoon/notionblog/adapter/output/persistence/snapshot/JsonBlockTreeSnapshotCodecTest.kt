@@ -1,0 +1,175 @@
+package xyz.robinjoon.notionblog.adapter.output.persistence.snapshot
+
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatIllegalArgumentException
+import org.junit.jupiter.api.Test
+import tools.jackson.databind.json.JsonMapper
+import xyz.robinjoon.notionblog.domain.post.block.BlockId
+import xyz.robinjoon.notionblog.domain.post.block.BlockNode
+import xyz.robinjoon.notionblog.domain.post.block.BlockTree
+import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.HeadingLevel
+import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.MediaBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.MediaType
+import xyz.robinjoon.notionblog.domain.post.block.content.MeetingNotesStatus
+import xyz.robinjoon.notionblog.domain.post.block.content.NumberedListFormat
+import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.SpecialBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.SynchronizedBlockOrigin
+import xyz.robinjoon.notionblog.domain.post.block.content.TextBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.UnsupportedBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
+import xyz.robinjoon.notionblog.domain.post.block.inline.LinkTarget
+import xyz.robinjoon.notionblog.domain.post.block.inline.MentionKind
+import xyz.robinjoon.notionblog.domain.post.block.inline.TextAnnotations
+import xyz.robinjoon.notionblog.domain.post.block.media.MediaSource
+import xyz.robinjoon.notionblog.domain.post.block.style.Alignment
+import xyz.robinjoon.notionblog.domain.post.block.style.BlockStyle
+import xyz.robinjoon.notionblog.domain.post.block.style.ColorToken
+import xyz.robinjoon.notionblog.domain.post.block.style.StyleVariant
+import xyz.robinjoon.notionblog.domain.post.block.style.WidthToken
+import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
+import xyz.robinjoon.notionblog.domain.source.SourceId
+import java.net.URI
+import java.time.Instant
+
+class JsonBlockTreeSnapshotCodecTest {
+    private val codec = JsonBlockTreeSnapshotCodec()
+
+    @Test
+    fun `round trips every block content subtype using stable logical kinds`() {
+        val tree = completeBlockTree()
+
+        val encoded = codec.encode(tree)
+
+        assertThat(codec.decode(encoded)).isEqualTo(tree)
+        val document = JsonMapper.builder().build().readTree(encoded)
+        assertThat(document.get("schemaVersion").asInt()).isEqualTo(1)
+        assertThat(document.get("kind").asString()).isEqualTo("block_tree_snapshot")
+        assertThat(document.get("blocks").size()).isGreaterThan(0)
+        assertThat(encoded).doesNotContain("xyz.", "java.", "kotlin.", "@class", "\"type\"")
+    }
+
+    @Test
+    fun `preserves nested children and inline source document links`() {
+        val tree = BlockTree(
+            listOf(
+                node(
+                    "parent",
+                    TextBlockContent.Paragraph(listOf(linkedText())),
+                    children = listOf(node("child", TextBlockContent.Quote(listOf(InlineContent.Equation("x^2"))))),
+                ),
+            ),
+        )
+
+        assertThat(codec.decode(codec.encode(tree))).isEqualTo(tree)
+    }
+
+    @Test
+    fun `falls back to unsupported content for an unknown logical block kind`() {
+        val decoded = codec.decode(
+            """
+            {
+              "schemaVersion": 1,
+              "kind": "block_tree_snapshot",
+              "blocks": [
+                {
+                  "id": "future-block",
+                  "kind": "future_widget",
+                  "style": {},
+                  "content": "unrecognized future payload",
+                  "children": [{
+                    "id": "child",
+                    "kind": "paragraph",
+                    "style": {},
+                    "content": {"richText": []},
+                    "children": []
+                  }]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertThat(decoded.roots.single().content).isEqualTo(UnsupportedBlockContent("future_widget"))
+        assertThat(decoded.roots.single().children.single().content).isEqualTo(TextBlockContent.Paragraph(emptyList()))
+    }
+
+    @Test
+    fun `rejects unsupported snapshot schema versions`() {
+        assertThatIllegalArgumentException().isThrownBy {
+            codec.decode("""{"schemaVersion":2,"kind":"block_tree_snapshot","blocks":[]}""")
+        }.withMessage("unsupported block tree snapshot schema version: 2")
+    }
+
+    @Test
+    fun `rejects malformed known block kinds instead of disguising them as unsupported`() {
+        assertThatIllegalArgumentException().isThrownBy {
+            codec.decode(
+                """
+                {
+                  "schemaVersion": 1,
+                  "kind": "block_tree_snapshot",
+                  "blocks": [{"id":"broken","kind":"paragraph","style":{},"children":[]}]
+                }
+                """.trimIndent(),
+            )
+        }.withMessageContaining("paragraph")
+    }
+
+    private fun completeBlockTree(): BlockTree = BlockTree(
+        listOf(
+            node("paragraph", TextBlockContent.Paragraph(listOf(linkedText()))),
+            node("heading", TextBlockContent.Heading(HeadingLevel.FOUR, listOf(InlineContent.Text("Heading")), true)),
+            node("quote", TextBlockContent.Quote(listOf(InlineContent.Equation("E=mc^2")))),
+            node("toggle", TextBlockContent.Toggle(listOf(InlineContent.Text("Toggle")))),
+            node("callout", TextBlockContent.Callout(listOf(InlineContent.Text("Callout")), BlockIcon.Media(MediaSource.External(URI("https://example.com/icon.png"))))),
+            node("code", TextBlockContent.Code(listOf(InlineContent.Text("println()")), "kotlin", listOf(InlineContent.Text("Caption")))),
+            node("equation", TextBlockContent.Equation("a+b")),
+            node("bullet", ListBlockContent.BulletedItem(listOf(InlineContent.Text("Bullet")))),
+            node("numbered", ListBlockContent.NumberedItem(listOf(InlineContent.Text("Numbered")), 3, NumberedListFormat.UPPER_ROMAN)),
+            node("todo", ListBlockContent.ToDoItem(listOf(InlineContent.Text("To do")), true)),
+            node("divider", LayoutBlockContent.Divider),
+            node("columns", LayoutBlockContent.ColumnList, children = listOf(node("column", LayoutBlockContent.Column(WidthToken(0.5))))),
+            node("tabs", LayoutBlockContent.TabContainer, children = listOf(node("tab", LayoutBlockContent.TabItem(listOf(InlineContent.Text("Tab")), BlockIcon.Emoji("📌"))))),
+            node("table", LayoutBlockContent.Table(1, hasColumnHeader = true, hasRowHeader = true), children = listOf(node("table-row", LayoutBlockContent.TableRow(listOf(listOf(InlineContent.Text("Cell"))))))),
+            node("child-post", ReferenceBlockContent.ChildPost("Child", sourceReference)),
+            node("document-link", ReferenceBlockContent.DocumentLink(sourceReference, URI("https://example.com/document"))),
+            node("database-link", ReferenceBlockContent.DatabaseLink(sourceReference, null)),
+            node("breadcrumb", ReferenceBlockContent.Breadcrumb(listOf(LinkTarget.ExternalUrl(URI("https://example.com")), LinkTarget.SourceDocument(sourceReference, null)))),
+            node("table-of-contents", ReferenceBlockContent.TableOfContents),
+            node("media", MediaBlockContent.Media(MediaType.PDF, MediaSource.SourceHosted(URI("https://example.com/file.pdf"), Instant.parse("2026-08-25T00:00:00Z")), "file.pdf", listOf(InlineContent.Text("PDF")))),
+            node("bookmark", MediaBlockContent.Bookmark(URI("https://example.com/bookmark"), listOf(InlineContent.Text("Bookmark")))),
+            node("link-preview", MediaBlockContent.LinkPreview(URI("https://example.com/preview"))),
+            node("embed", MediaBlockContent.Embed(URI("https://example.com/embed"), listOf(InlineContent.Text("Embed")))),
+            node("synchronized", ReusableBlockContent.Synchronized(SynchronizedBlockOrigin(sourceReference, "origin-block"))),
+            node("template", ReusableBlockContent.Template),
+            node("meeting-notes", SpecialBlockContent.MeetingNotes("Meeting", MeetingNotesStatus.IN_PROGRESS, listOf(InlineContent.Mention("Jane", MentionKind.USER, target = LinkTarget.ExternalUrl(URI("https://example.com/jane")))), LinkTarget.SourceDocument(sourceReference, URI("https://example.com/notes")))),
+            node("unsupported", UnsupportedBlockContent("future_type")),
+        ),
+    )
+
+    private fun node(
+        id: String,
+        content: xyz.robinjoon.notionblog.domain.post.block.content.BlockContent,
+        children: List<BlockNode> = emptyList(),
+    ): BlockNode = BlockNode(
+        id = BlockId(id),
+        content = content,
+        style = BlockStyle(ColorToken.RED, ColorToken.BLUE, Alignment.CENTER, WidthToken(0.75), StyleVariant("featured")),
+        children = children,
+    )
+
+    private fun linkedText(): InlineContent.Text = InlineContent.Text(
+        "Linked text",
+        TextAnnotations(bold = true, italic = true, strikethrough = true, underline = true, code = true, foreground = ColorToken.ORANGE, background = ColorToken.PURPLE),
+        LinkTarget.SourceDocument(sourceReference, URI("https://example.com/original")),
+    )
+
+    private companion object {
+        val sourceReference = SourceDocumentRef(SourceId("notion-main"), "external-document")
+    }
+}

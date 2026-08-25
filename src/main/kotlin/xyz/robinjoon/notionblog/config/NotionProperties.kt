@@ -5,18 +5,29 @@ import java.time.Duration
 
 @ConfigurationProperties("notion")
 data class NotionProperties(
-    val token: String,
-    val settingsDataSourceId: String,
-    val apiVersion: String,
-    val baseUrl: String,
-    val requestTimeout: Duration,
-    val collectionTimeout: Duration,
+    val token: String = "",
+    val settingsDataSourceId: String = "",
+    val sourceId: String = "notion",
+    val apiVersion: String = SUPPORTED_API_VERSION,
+    val baseUrl: String = "https://api.notion.com/v1",
+    val requestTimeout: Duration = Duration.ofSeconds(10),
+    val collectionTimeout: Duration = Duration.ofSeconds(30),
+    val maxBlockDepth: Int = 32,
+    val maxBlockCount: Int = 10_000,
 ) {
     init {
         require(token.isNotBlank()) { "notion.token must not be blank" }
         require(settingsDataSourceId.isNotBlank()) { "notion.settings-data-source-id must not be blank" }
-        require(apiVersion.isNotBlank()) { "notion.api-version must not be blank" }
-        require(!requestTimeout.isZero && !requestTimeout.isNegative) { "notion.request-timeout must be positive" }
-        require(!collectionTimeout.isZero && !collectionTimeout.isNegative) { "notion.collection-timeout must be positive" }
+        require(sourceId.isNotBlank()) { "notion.source-id must not be blank" }
+        require(apiVersion == SUPPORTED_API_VERSION) { "notion.api-version must be $SUPPORTED_API_VERSION" }
+        require(baseUrl.isNotBlank()) { "notion.base-url must not be blank" }
+        require(requestTimeout.isPositive) { "notion.request-timeout must be positive" }
+        require(collectionTimeout.isPositive) { "notion.collection-timeout must be positive" }
+        require(maxBlockDepth > 0) { "notion.max-block-depth must be positive" }
+        require(maxBlockCount > 0) { "notion.max-block-count must be positive" }
+    }
+
+    private companion object {
+        const val SUPPORTED_API_VERSION = "2026-03-11"
     }
 }
