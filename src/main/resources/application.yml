@@ -14,18 +14,37 @@ spring:
 notion:
   token: ${NOTION_TOKEN}
   settings-data-source-id: ${NOTION_SETTINGS_DATA_SOURCE_ID}
-  api-version: ${NOTION_API_VERSION}
+  source-id: ${NOTION_SOURCE_ID:notion}
+  api-version: ${NOTION_API_VERSION:2026-03-11}
   base-url: ${NOTION_BASE_URL:https://api.notion.com/v1}
   request-timeout: ${NOTION_REQUEST_TIMEOUT:10s}
   collection-timeout: ${NOTION_COLLECTION_TIMEOUT:30s}
+  max-block-depth: ${NOTION_MAX_BLOCK_DEPTH:32}
+  max-block-count: ${NOTION_MAX_BLOCK_COUNT:10000}
 
 blog:
-  base-url: ${BLOG_BASE_URL}
-  refresh:
-    enabled: ${BLOG_REFRESH_ENABLED:true}
-    interval-ms: ${BLOG_REFRESH_INTERVAL_MS:${BLOG_REFRESH_FIXED_DELAY_MS:60000}}
-    thread-count: ${BLOG_REFRESH_THREAD_COUNT:2}
-    queue-capacity: ${BLOG_REFRESH_QUEUE_CAPACITY:32}
+  synchronization:
+    enabled: ${BLOG_SYNCHRONIZATION_ENABLED:true}
+    interval-ms: ${BLOG_SYNCHRONIZATION_INTERVAL_MS:60000}
+    due-batch-size: ${BLOG_SYNCHRONIZATION_DUE_BATCH_SIZE:100}
+    success-interval: ${BLOG_SYNCHRONIZATION_SUCCESS_INTERVAL:5m}
+    initial-failure-delay: ${BLOG_SYNCHRONIZATION_INITIAL_FAILURE_DELAY:5s}
+    maximum-failure-delay: ${BLOG_SYNCHRONIZATION_MAXIMUM_FAILURE_DELAY:5m}
+  presentation:
+    default-profile-key: notion-default
+    assets:
+      - key: notion-core
+        version: 1
+        integrity: sha384-V763UM2y9iSN6rUXr+H4a3GeowrAJqJ53QPBQoJQ9/W3UVee9kfeg7pO3tJJ7V/T
+        public-path: /presentation/notion/v1/notion.css
+        media-type: text/css
+        current: true
+      - key: notion-tabs
+        version: 1
+        integrity: sha384-VucbIMH0dIpFjnUI6nyjosBUX+cUDRo82zmVz+TihzIdd4C9WwKtpQ1i06jBFgUy
+        public-path: /presentation/notion/v1/notion.js
+        media-type: application/javascript
+        current: true
 
 management:
   endpoint:
