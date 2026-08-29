@@ -21,7 +21,12 @@ sealed interface ReferenceBlockContent : BlockContent {
     data class DatabaseLink(
         val reference: SourceDocumentRef,
         val originalUrl: java.net.URI?,
-    ) : ReferenceBlockContent
+        val title: String? = null,
+    ) : ReferenceBlockContent {
+        init {
+            require(title == null || title.isNotBlank()) { "database link title must not be blank" }
+        }
+    }
 
     data class Breadcrumb(
         val items: List<LinkTarget>,

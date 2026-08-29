@@ -13,6 +13,7 @@ sealed interface ListBlockContent : BlockContent {
         override val richText: List<InlineContent>,
         val startNumber: Int = 1,
         val displayFormat: NumberedListFormat = NumberedListFormat.DECIMAL,
+        val startsNewList: Boolean = false,
     ) : ListBlockContent {
         init {
             require(startNumber > 0) { "numbered list start number must be positive" }

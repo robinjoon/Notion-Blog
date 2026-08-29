@@ -1,0 +1,112 @@
+/* Trusted overrides loaded after the immutable Notion v1 core stylesheet. */
+html,
+body {
+  min-block-size: 100%;
+  margin: 0;
+  color: var(--notion-text);
+  background-color: var(--notion-page);
+}
+
+.notion-page {
+  min-block-size: 100vh;
+}
+
+html:has(body > .notion-page.notion-color-mode-dark),
+body:has(> .notion-page.notion-color-mode-dark),
+html:has(body > .notion-page[data-color-mode="dark"]),
+body:has(> .notion-page[data-color-mode="dark"]) {
+  color: #e6e6e4;
+  background-color: #191919;
+}
+
+.notion-list-todo,
+.notion-list-todo > li {
+  list-style: none;
+}
+
+.notion-list-todo {
+  padding-inline-start: 0;
+}
+
+.notion-block-icon {
+  flex: none;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.notion-callout-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.notion-tabs [role=tab] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.notion-tab-icon {
+  inline-size: 1.15rem;
+  block-size: 1.15rem;
+}
+
+.notion-native-icon {
+  inline-size: auto;
+  max-inline-size: 10rem;
+  padding-inline: 0.3rem;
+  overflow: hidden;
+  border: 1px solid currentColor;
+  border-radius: var(--notion-radius);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notion-math {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--notion-font-mono);
+  white-space: pre-wrap;
+}
+
+.notion-math-inline {
+  display: inline-block;
+}
+
+.notion-math-block {
+  display: block;
+  overflow-x: auto;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:has(body > .notion-page.notion-color-mode-system),
+  body:has(> .notion-page.notion-color-mode-system) {
+    color: #e6e6e4;
+    background-color: #191919;
+  }
+
+  .notion-page.notion-color-mode-system .notion-color-gray { color: #a4a4a0; }
+  .notion-page.notion-color-mode-system .notion-color-brown { color: #c6967a; }
+  .notion-page.notion-color-mode-system .notion-color-orange { color: #f5a86d; }
+  .notion-page.notion-color-mode-system .notion-color-yellow { color: #eac35c; }
+  .notion-page.notion-color-mode-system .notion-color-green { color: #7cba8e; }
+  .notion-page.notion-color-mode-system .notion-color-blue { color: #6cadff; }
+  .notion-page.notion-color-mode-system .notion-color-purple { color: #c68ce9; }
+  .notion-page.notion-color-mode-system .notion-color-pink { color: #ef8ab6; }
+  .notion-page.notion-color-mode-system .notion-color-red { color: #ff8b8b; }
+
+  .notion-page.notion-color-mode-system .notion-background-gray { background-color: #2f2f2d; }
+  .notion-page.notion-color-mode-system .notion-background-brown { background-color: #3b2f2c; }
+  .notion-page.notion-color-mode-system .notion-background-orange { background-color: #49352a; }
+  .notion-page.notion-color-mode-system .notion-background-yellow { background-color: #463d28; }
+  .notion-page.notion-color-mode-system .notion-background-green { background-color: #293b31; }
+  .notion-page.notion-color-mode-system .notion-background-blue { background-color: #293b4a; }
+  .notion-page.notion-color-mode-system .notion-background-purple { background-color: #373044; }
+  .notion-page.notion-color-mode-system .notion-background-pink { background-color: #452f38; }
+  .notion-page.notion-color-mode-system .notion-background-red { background-color: #4a2d2d; }
+}

@@ -42,4 +42,44 @@ class RepositoryBoundaryTest {
             .doesNotContain("HARNESS_DEPLOY_KEY", "tools/platform.py", "git push origin HEAD:main")
         assertThat(workflow).doesNotContain("bootstrap-homelab", "deploy-*", "kubectl", "KUBECONFIG")
     }
+
+    @Test
+    fun `ci requests the harness release with the pushed tag after a default branch publish`() {
+        val workflow = Files.readString(Path.of(".github/workflows/ci.yml"))
+        val imagePushStep = workflow.indexOf("- name: Build and push immutable image")
+        val releaseRequestStep = workflow.indexOf("- name: Request workload release")
+        val freshnessGuard = workflow.indexOf("git ls-remote --exit-code origin refs/heads/master")
+        val harnessCommand = workflow.indexOf("gh workflow run release-workload-image.yml")
+
+        assertThat(imagePushStep).isGreaterThanOrEqualTo(0)
+        assertThat(releaseRequestStep).isGreaterThan(imagePushStep)
+        assertThat(freshnessGuard).isGreaterThan(releaseRequestStep)
+        assertThat(harnessCommand).isGreaterThan(freshnessGuard)
+        assertThat(workflow).contains(
+            "group: notion-blog-ci-\${{ github.ref == 'refs/heads/master' && 'master' || github.run_id }}",
+            "cancel-in-progress: \${{ github.ref == 'refs/heads/master' }}",
+            "if: success() && github.ref == 'refs/heads/master'",
+            "GH_TOKEN: \${{ secrets.HARNESS_ACTIONS_TOKEN }}",
+            "tags: \${{ env.REGISTRY_HOST }}/\${{ env.REGISTRY_IMAGE }}:\${{ env.IMAGE_TAG }}",
+            "if [[ \"\$latest_sha\" != \"\$GITHUB_SHA\" ]]",
+            "--repo robinjoon/Simple-K3S-Herness",
+            "--ref main",
+            "-f app=notion-blog",
+            "-f container=app",
+            "-f tag=\"\$IMAGE_TAG\"",
+        )
+        assertThat(workflow).doesNotContain(":latest", "if: always()", "continue-on-error: true")
+        assertThat(workflow.split("docker/build-push-action@")).hasSize(2)
+    }
+
+    @Test
+    fun `readme documents the narrowly scoped harness actions token`() {
+        val readme = Files.readString(Path.of("README.md"))
+
+        assertThat(readme).contains(
+            "HARNESS_ACTIONS_TOKEN",
+            "robinjoon/Simple-K3S-Herness",
+            "`Actions: write`",
+        )
+    }
 }

@@ -10,6 +10,8 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean
+import org.springframework.core.io.ClassPathResource
 import org.testcontainers.containers.PostgreSQLContainer
 import tools.jackson.databind.json.JsonMapper
 import xyz.robinjoon.notionblog.adapter.output.persistence.exposed.table.PostSnapshotTable
@@ -77,30 +79,48 @@ class TargetPersistenceSchemaIntegrationTest {
     }
 
     @Test
-    fun `seeds the immutable default presentation profile with catalog-matched ordered assets`() {
+    fun `keeps the original default profile immutable and activates the enhanced catalog-matched version`() {
         connection { connection ->
-            connection.prepareStatement(
+            val profiles = connection.prepareStatement(
                 "select profile_key, version, token_json, is_current, created_at from presentation_profile " +
-                    "where presentation_profile_id = ?",
+                    "where presentation_profile_id = ? order by version",
             ).use { statement ->
                 statement.setObject(1, DEFAULT_PROFILE_ID)
                 statement.executeQuery().use { rows ->
-                    assertThat(rows.next()).isTrue()
-                    assertThat(rows.getString("profile_key")).isEqualTo("notion-default")
-                    assertThat(rows.getLong("version")).isEqualTo(1)
-                    assertThat(jsonMapper.readTree(rows.getString("token_json"))).isEqualTo(
-                        jsonMapper.readTree("""{"colorMode":"SYSTEM","contentWidth":"STANDARD","density":"COMFORTABLE"}"""),
-                    )
-                    assertThat(rows.getBoolean("is_current")).isTrue()
-                    assertThat(rows.getObject("created_at", OffsetDateTime::class.java).toInstant())
-                        .isEqualTo(Instant.parse("2026-08-25T00:00:00Z"))
-                    assertThat(rows.next()).isFalse()
+                    buildList {
+                        while (rows.next()) {
+                            add(
+                                SeedProfile(
+                                    rows.getString("profile_key"),
+                                    rows.getLong("version"),
+                                    rows.getString("token_json"),
+                                    rows.getBoolean("is_current"),
+                                    rows.getObject("created_at", OffsetDateTime::class.java).toInstant(),
+                                ),
+                            )
+                        }
+                    }
                 }
+            }
+
+            assertThat(profiles).hasSize(2)
+            assertThat(profiles.map(SeedProfile::version)).containsExactly(1, 2)
+            assertThat(profiles.map(SeedProfile::current)).containsExactly(false, true)
+            assertThat(profiles.map(SeedProfile::createdAt)).containsExactly(
+                Instant.parse("2026-08-25T00:00:00Z"),
+                Instant.parse("2026-08-27T00:00:00Z"),
+            )
+            profiles.forEach { profile ->
+                assertThat(profile.key).isEqualTo("notion-default")
+                assertThat(jsonMapper.readTree(profile.tokenJson)).isEqualTo(
+                    jsonMapper.readTree("""{"colorMode":"SYSTEM","contentWidth":"STANDARD","density":"COMFORTABLE"}"""),
+                )
             }
 
             val assets = connection.prepareStatement(
                 "select asset_kind, asset_key, asset_version, integrity, position from presentation_profile_asset " +
-                    "where presentation_profile_id = ? and presentation_profile_version = 1 order by asset_kind",
+                    "where presentation_profile_id = ? and presentation_profile_version = 2 " +
+                    "order by case asset_kind when 'STYLE_SHEET' then 0 else 1 end, position",
             ).use { statement ->
                 statement.setObject(1, DEFAULT_PROFILE_ID)
                 statement.executeQuery().use { rows ->
@@ -120,21 +140,39 @@ class TargetPersistenceSchemaIntegrationTest {
                 }
             }
 
-            assertThat(assets).containsExactlyInAnyOrder(
+            val configuredIntegrity = configuredAssetIntegrity()
+
+            assertThat(assets).containsExactly(
                 SeedAsset(
                     "STYLE_SHEET",
                     "notion-core",
                     1,
-                    "sha384-V763UM2y9iSN6rUXr+H4a3GeowrAJqJ53QPBQoJQ9/W3UVee9kfeg7pO3tJJ7V/T",
+                    configuredIntegrity.getValue("notion-core"),
                     0,
                 ),
                 SeedAsset(
-                    "SCRIPT",
-                    "notion-tabs",
+                    "STYLE_SHEET",
+                    "katex-styles",
                     1,
-                    "sha384-VucbIMH0dIpFjnUI6nyjosBUX+cUDRo82zmVz+TihzIdd4C9WwKtpQ1i06jBFgUy",
+                    configuredIntegrity.getValue("katex-styles"),
+                    1,
+                ),
+                SeedAsset(
+                    "STYLE_SHEET",
+                    "notion-enhancements",
+                    1,
+                    configuredIntegrity.getValue("notion-enhancements"),
+                    2,
+                ),
+                SeedAsset(
+                    "SCRIPT",
+                    "katex-runtime",
+                    1,
+                    configuredIntegrity.getValue("katex-runtime"),
                     0,
                 ),
+                SeedAsset("SCRIPT", "notion-tabs", 1, configuredIntegrity.getValue("notion-tabs"), 1),
+                SeedAsset("SCRIPT", "notion-math", 1, configuredIntegrity.getValue("notion-math"), 2),
             )
 
             connection.prepareStatement(
@@ -408,6 +446,29 @@ class TargetPersistenceSchemaIntegrationTest {
     private fun connection(block: (Connection) -> Unit) {
         DriverManager.getConnection(database.jdbcUrl, database.username, database.password).use(block)
     }
+
+    private fun configuredAssetIntegrity(): Map<String, String> {
+        val properties = YamlPropertiesFactoryBean().apply {
+            setResources(ClassPathResource("application.yml"))
+        }.getObject()!!
+        return generateSequence(0) { it + 1 }
+            .map { index ->
+                val prefix = "blog.presentation.assets[$index]"
+                val key = properties.getProperty("$prefix.key") ?: return@map null
+                key to properties.getProperty("$prefix.integrity")
+            }
+            .takeWhile { it != null }
+            .filterNotNull()
+            .toMap()
+    }
+
+    private data class SeedProfile(
+        val key: String,
+        val version: Long,
+        val tokenJson: String,
+        val current: Boolean,
+        val createdAt: Instant,
+    )
 
     private data class SeedAsset(
         val kind: String,

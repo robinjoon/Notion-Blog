@@ -9,9 +9,14 @@ import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
 import xyz.robinjoon.notionblog.application.port.output.source.SourceMappingException
 import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
+import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaType
+import xyz.robinjoon.notionblog.domain.post.block.content.NumberedListFormat
+import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.TextBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.UnsupportedBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
@@ -19,6 +24,7 @@ import xyz.robinjoon.notionblog.domain.post.block.inline.LinkTarget
 import xyz.robinjoon.notionblog.domain.post.block.media.MediaSource
 import xyz.robinjoon.notionblog.domain.post.block.style.ColorToken
 import xyz.robinjoon.notionblog.domain.source.SourceId
+import java.net.URI
 import java.time.Instant
 
 class NotionBlockMapperTest {
@@ -91,6 +97,67 @@ class NotionBlockMapperTest {
     }
 
     @Test
+    fun `preserves safe hrefs for non-page mentions while keeping page mentions as source documents`() {
+        val block = envelope(
+            type = "paragraph",
+            payload = """
+                {
+                  "rich_text": [
+                    {"type":"mention","mention":{"type":"page","page":{"id":"a1b2c3d4e5f64a5b8c9d0e1f2a3b4c5d"}},"annotations":{"color":"default"},"plain_text":"Page","href":"https://www.notion.so/page"},
+                    {"type":"mention","mention":{"type":"database","database":{"id":"database-1"}},"annotations":{"color":"default"},"plain_text":"Database","href":"https://www.notion.so/database"},
+                    {"type":"mention","mention":{"type":"data_source","data_source":{"id":"data-source-1"}},"annotations":{"color":"default"},"plain_text":"Data source","href":"https://www.notion.so/data-source"},
+                    {"type":"mention","mention":{"type":"user","user":{"id":"user-1"}},"annotations":{"color":"default"},"plain_text":"Ada","href":"https://www.notion.so/user"},
+                    {"type":"mention","mention":{"type":"agent","agent":{"id":"agent-1"}},"annotations":{"color":"default"},"plain_text":"Agent","href":"https://www.notion.so/agent"},
+                    {"type":"mention","mention":{"type":"date","date":{"start":"2026-01-01"}},"annotations":{"color":"default"},"plain_text":"Jan 1","href":"https://www.notion.so/date"},
+                    {"type":"mention","mention":{"type":"template_mention","template_mention":{"type":"template_mention_date","template_mention_date":"today"}},"annotations":{"color":"default"},"plain_text":"Today","href":"https://www.notion.so/template"},
+                    {"type":"mention","mention":{"type":"link_preview","link_preview":{"url":"https://example.com/preview"}},"annotations":{"color":"default"},"plain_text":"Preview","href":"https://www.notion.so/preview"},
+                    {"type":"mention","mention":{"type":"future_mention","future_mention":{}},"annotations":{"color":"default"},"plain_text":"Future","href":"https://www.notion.so/future"}
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val mentions = (mapper.map(block).content as TextBlockContent.Paragraph).richText
+            .map { it as InlineContent.Mention }
+
+        assertThat(mentions.first().target).isEqualTo(
+            LinkTarget.SourceDocument(
+                reference = xyz.robinjoon.notionblog.domain.source.SourceDocumentRef(
+                    SourceId("notion-main"),
+                    "a1b2c3d4e5f64a5b8c9d0e1f2a3b4c5d",
+                ),
+                originalUrl = URI("https://www.notion.so/page"),
+            ),
+        )
+        assertThat(mentions.drop(1).map { it.target }).containsExactly(
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/database")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/data-source")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/user")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/agent")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/date")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/template")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/preview")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/future")),
+        )
+    }
+
+    @Test
+    fun `rejects an unsafe href on a non-page mention`() {
+        val block = envelope(
+            type = "paragraph",
+            payload = """
+                {"rich_text":[
+                  {"type":"mention","mention":{"type":"database","database":{"id":"database-1"}},"annotations":{"color":"default"},"plain_text":"Database","href":"javascript:alert(1)"}
+                ]}
+            """.trimIndent(),
+        )
+
+        assertThatThrownBy { mapper.map(block) }
+            .isInstanceOf(NotionBlockMappingException::class.java)
+            .hasMessage("URL must use http or https")
+    }
+
+    @Test
     fun `maps source hosted media expiry and external media type`() {
         val hosted = mapper.map(
             envelope(
@@ -151,6 +218,89 @@ class NotionBlockMapperTest {
             LayoutBlockContent.TabItem(
                 title = listOf(InlineContent.Text("Overview")),
                 icon = xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon.Emoji("📋"),
+            ),
+        )
+    }
+
+    @Test
+    fun `maps numbered list start format and explicit restart marker`() {
+        val variants = listOf(
+            Triple("numbers", NumberedListFormat.DECIMAL, 1),
+            Triple("letters", NumberedListFormat.LOWER_ALPHA, 4),
+            Triple("roman", NumberedListFormat.LOWER_ROMAN, 5),
+        )
+
+        variants.forEach { (notionFormat, expectedFormat, startNumber) ->
+            val content = mapper.map(
+                envelope(
+                    type = "numbered_list_item",
+                    payload = """{"rich_text":[],"list_start_index":$startNumber,"list_format":"$notionFormat"}""",
+                ),
+            ).content as ListBlockContent.NumberedItem
+
+            assertThat(content.startNumber).isEqualTo(startNumber)
+            assertThat(content.displayFormat).isEqualTo(expectedFormat)
+            assertThat(content.startsNewList).isTrue()
+        }
+
+        assertThat(
+            mapper.map(envelope(type = "numbered_list_item", payload = """{"rich_text":[]}""")).content,
+        ).isEqualTo(ListBlockContent.NumberedItem(emptyList()))
+    }
+
+    @Test
+    fun `rejects an unknown numbered list format instead of silently changing its meaning`() {
+        assertThatThrownBy {
+            mapper.map(
+                envelope(
+                    type = "numbered_list_item",
+                    payload = """{"rich_text":[],"list_format":"future_format"}""",
+                ),
+            )
+        }.isInstanceOf(NotionBlockMappingException::class.java)
+    }
+
+    @Test
+    fun `preserves child database title and template rich text title`() {
+        val database = mapper.map(
+            envelope(
+                id = "database-external-id",
+                type = "child_database",
+                payload = """{"title":"Team projects"}""",
+            ),
+        ).content as ReferenceBlockContent.DatabaseLink
+        val template = mapper.map(
+            envelope(
+                type = "template",
+                payload = richTextPayload("Weekly review"),
+            ),
+        ).content as ReusableBlockContent.Template
+
+        assertThat(database.title).isEqualTo("Team projects")
+        assertThat(template.title).containsExactly(InlineContent.Text("Weekly review"))
+    }
+
+    @Test
+    fun `maps native and custom emoji icons without losing display metadata`() {
+        val native = mapper.map(
+            envelope(
+                type = "callout",
+                payload = """{"rich_text":[],"icon":{"type":"icon","icon":{"name":"library","color":"blue"}}}""",
+            ),
+        ).content as TextBlockContent.Callout
+        val customEmoji = mapper.map(
+            envelope(
+                type = "callout",
+                payload = """{"rich_text":[],"icon":{"type":"custom_emoji","custom_emoji":{"id":"emoji-id","name":"parrot","url":"https://example.com/parrot.png"}}}""",
+            ),
+        ).content as TextBlockContent.Callout
+
+        assertThat(native.icon).isEqualTo(BlockIcon.Native("library", ColorToken.BLUE))
+        assertThat(customEmoji.icon).isEqualTo(
+            BlockIcon.CustomEmoji(
+                externalId = "emoji-id",
+                name = "parrot",
+                source = MediaSource.External(URI("https://example.com/parrot.png")),
             ),
         )
     }
@@ -241,6 +391,8 @@ class NotionBlockMapperTest {
         inTrash = false,
         payload = objectMapper.readTree(payload),
     )
+
+    private fun richTextPayload(content: String): String = """{"rich_text":[{"type":"text","text":{"content":"$content","link":null},"annotations":{"color":"default"},"plain_text":"$content","href":null}]}"""
 
     private fun readResource(path: String): String = checkNotNull(javaClass.classLoader.getResourceAsStream(path)) { "missing resource $path" }
         .bufferedReader()

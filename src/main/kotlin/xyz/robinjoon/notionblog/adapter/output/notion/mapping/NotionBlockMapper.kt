@@ -10,6 +10,7 @@ import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaType
 import xyz.robinjoon.notionblog.domain.post.block.content.MeetingNotesStatus
+import xyz.robinjoon.notionblog.domain.post.block.content.NumberedListFormat
 import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.SpecialBlockContent
@@ -92,7 +93,7 @@ internal class NotionBlockMapper(
 
         "bulleted_list_item" -> ListBlockContent.BulletedItem(richText(payload))
 
-        "numbered_list_item" -> ListBlockContent.NumberedItem(richText(payload))
+        "numbered_list_item" -> numberedListItem(payload)
 
         "to_do" -> ListBlockContent.ToDoItem(richText(payload), payload.requiredBoolean("checked"))
 
@@ -140,16 +141,16 @@ internal class NotionBlockMapper(
         "link_to_page" -> linkToPage(payload)
 
         "child_database" -> {
-            payload.requiredText("title")
-            ReferenceBlockContent.DatabaseLink(sourceReference(blockExternalId), null)
+            ReferenceBlockContent.DatabaseLink(
+                reference = sourceReference(blockExternalId),
+                originalUrl = null,
+                title = payload.requiredText("title"),
+            )
         }
 
         "synced_block" -> syncedBlock(payload, sourceDocument)
 
-        "template" -> {
-            richText(payload)
-            ReusableBlockContent.Template
-        }
+        "template" -> ReusableBlockContent.Template(richText(payload))
 
         "bookmark" -> MediaBlockContent.Bookmark(payload.safeUri("url"), richTextOrEmpty(payload, "caption"))
 
@@ -182,6 +183,24 @@ internal class NotionBlockMapper(
         richText = richText(payload),
         isToggleable = payload.requiredBoolean("is_toggleable"),
     )
+
+    private fun numberedListItem(payload: JsonNode): ListBlockContent.NumberedItem {
+        val hasExplicitStart = payload.has("list_start_index")
+        val hasExplicitFormat = payload.has("list_format")
+        return ListBlockContent.NumberedItem(
+            richText = richText(payload),
+            startNumber = if (hasExplicitStart) payload.requiredPositiveInt("list_start_index") else 1,
+            displayFormat = if (hasExplicitFormat) numberedListFormat(payload.requiredText("list_format")) else NumberedListFormat.DECIMAL,
+            startsNewList = hasExplicitStart || hasExplicitFormat,
+        )
+    }
+
+    private fun numberedListFormat(value: String): NumberedListFormat = when (value) {
+        "numbers" -> NumberedListFormat.DECIMAL
+        "letters" -> NumberedListFormat.LOWER_ALPHA
+        "roman" -> NumberedListFormat.LOWER_ROMAN
+        else -> throw NotionBlockMappingException("numbered list format is unsupported")
+    }
 
     private fun linkToPage(payload: JsonNode) = when (payload.requiredText("type")) {
         "page_id" -> ReferenceBlockContent.DocumentLink(
@@ -270,6 +289,19 @@ internal class NotionBlockMapper(
     private fun icon(node: JsonNode?): BlockIcon? {
         if (node == null) return null
         node.optionalText("emoji")?.let { return BlockIcon.Emoji(it) }
+        node.optionalObject("icon")?.let { nativeIcon ->
+            return BlockIcon.Native(
+                name = nativeIcon.requiredText("name"),
+                color = nativeIconColor(nativeIcon.requiredText("color")),
+            )
+        }
+        node.optionalObject("custom_emoji")?.let { customEmoji ->
+            return BlockIcon.CustomEmoji(
+                externalId = customEmoji.requiredText("id"),
+                name = customEmoji.requiredText("name"),
+                source = MediaSource.External(customEmoji.safeUri("url")),
+            )
+        }
         val file = node.optionalObject("file") ?: node.optionalObject("external")
         return file?.let { mediaNode ->
             val source = if (node.has("file")) {
@@ -279,6 +311,14 @@ internal class NotionBlockMapper(
             }
             BlockIcon.Media(source)
         }
+    }
+
+    private fun nativeIconColor(value: String): ColorToken? {
+        val split = color(value)
+        if (split?.background != null) {
+            throw NotionBlockMappingException("native icon color must be a foreground color")
+        }
+        return split?.foreground
     }
 
     private fun richText(payload: JsonNode, field: String = "rich_text"): List<InlineContent> = payload.requiredArray(field).map(::inline)
@@ -318,9 +358,10 @@ internal class NotionBlockMapper(
                 originalUrl = href,
             )
 
-            "link_preview" -> mention.requiredObject("link_preview").safeUri("url").let(LinkTarget::ExternalUrl)
+            "link_preview" -> href?.let(LinkTarget::ExternalUrl)
+                ?: mention.requiredObject("link_preview").safeUri("url").let(LinkTarget::ExternalUrl)
 
-            else -> null
+            else -> href?.let(LinkTarget::ExternalUrl)
         }
         return InlineContent.Mention(
             label = node.requiredText("plain_text"),

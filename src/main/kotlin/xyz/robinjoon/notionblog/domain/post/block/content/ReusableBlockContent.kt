@@ -1,5 +1,6 @@
 package xyz.robinjoon.notionblog.domain.post.block.content
 
+import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
 import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
 
 sealed interface ReusableBlockContent : BlockContent {
@@ -7,7 +8,9 @@ sealed interface ReusableBlockContent : BlockContent {
         val origin: SynchronizedBlockOrigin?,
     ) : ReusableBlockContent
 
-    data object Template : ReusableBlockContent
+    data class Template(
+        val title: List<InlineContent> = emptyList(),
+    ) : ReusableBlockContent
 }
 
 data class SynchronizedBlockOrigin(
