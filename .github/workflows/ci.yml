@@ -7,6 +7,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: notion-blog-ci-${{ github.ref == 'refs/heads/master' && 'master' || github.run_id }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+
 permissions:
   contents: read
 
@@ -36,9 +40,6 @@ jobs:
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    concurrency:
-      group: notion-blog-homelab-publish
-      cancel-in-progress: false
     env:
       REGISTRY_HOST: ${{ vars.HOMELAB_REGISTRY_HOST }}
       REGISTRY_IMAGE: ${{ vars.HOMELAB_REGISTRY_IMAGE }}
@@ -77,3 +78,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+      - name: Request workload release
+        if: success() && github.ref == 'refs/heads/master'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HARNESS_ACTIONS_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest_sha="$(git ls-remote --exit-code origin refs/heads/master | awk '{print $1}')"
+          if [[ "$latest_sha" != "$GITHUB_SHA" ]]; then
+            echo "Skipping workload release because this workflow is stale."
+            exit 0
+          fi
+
+          gh workflow run release-workload-image.yml \
+            --repo robinjoon/Simple-K3S-Herness \
+            --ref main \
+            -f app=notion-blog \
+            -f container=app \
+            -f tag="$IMAGE_TAG"

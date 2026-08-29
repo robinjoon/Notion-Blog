@@ -134,4 +134,6 @@ Runtime container는 UID/GID `10001:10001`로 실행됩니다. read-only root fi
 
 이 저장소는 애플리케이션 소스, Gradle/Flyway 설정, Dockerfile과 CI workflow만 소유합니다. Helm chart, Kubernetes manifest, GitOps 설정, Secret/ConfigMap 주입은 별도 하네스 저장소에서 관리합니다.
 
+기본 브랜치 CI는 불변 태그로 container image push를 완료한 뒤, 같은 태그를 사용해 `robinjoon/Simple-K3S-Herness`의 배포 workflow를 요청합니다. 이를 위해 앱 저장소의 GitHub Actions Secret에 `HARNESS_ACTIONS_TOKEN`을 설정해야 합니다. 이 토큰은 하네스 저장소에만 접근할 수 있고 `Actions: write` 권한만 가진 fine-grained token 또는 GitHub App token을 사용합니다.
+
 애플리케이션은 `8080` 포트와 `/actuator/health/liveness`, `/actuator/health/readiness` endpoint를 제공합니다. 현재 scheduler는 다중 인스턴스 조정을 하지 않으므로 scheduler를 활성화한 인스턴스는 하나여야 합니다.
