@@ -39,10 +39,34 @@ blog:
         public-path: /presentation/notion/v1/notion.css
         media-type: text/css
         current: true
+      - key: katex-styles
+        version: 1
+        integrity: sha384-vlBdW0r3AcZO/HboRPznQNowvexd3fY8qHOWkBi5q7KGgqJ+F48+DceybYmrVbmB
+        public-path: /webjars/katex/0.17.0/dist/katex.min.css
+        media-type: text/css
+        current: true
+      - key: notion-enhancements
+        version: 1
+        integrity: sha384-8FGIk6YzcRYD/nVgH4V1NsyQVFRABYRaeoGSa7h5lcyCrDgneifs9e2TJ3/2zv6b
+        public-path: /presentation/notion/enhancements/v1/notion-enhancements.css
+        media-type: text/css
+        current: true
+      - key: katex-runtime
+        version: 1
+        integrity: sha384-AtrdNsnxl/75rvBneBVH7DtOvCxSVahR2zWqle1coBKd8DEmLoviqNeJSx64gNAs
+        public-path: /webjars/katex/0.17.0/dist/katex.min.js
+        media-type: application/javascript
+        current: true
       - key: notion-tabs
         version: 1
         integrity: sha384-VucbIMH0dIpFjnUI6nyjosBUX+cUDRo82zmVz+TihzIdd4C9WwKtpQ1i06jBFgUy
         public-path: /presentation/notion/v1/notion.js
+        media-type: application/javascript
+        current: true
+      - key: notion-math
+        version: 1
+        integrity: sha384-knQz/ThENhaPoCo7vG4+Zrmeh8Ut2aMQXiEOrgNMT/oxoT8PHnp+G/d+BDgJoScj
+        public-path: /presentation/notion/math/v1/notion-math.js
         media-type: application/javascript
         current: true
 

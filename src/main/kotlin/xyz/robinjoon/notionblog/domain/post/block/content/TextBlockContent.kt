@@ -2,6 +2,7 @@ package xyz.robinjoon.notionblog.domain.post.block.content
 
 import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
 import xyz.robinjoon.notionblog.domain.post.block.media.MediaSource
+import xyz.robinjoon.notionblog.domain.post.block.style.ColorToken
 
 sealed interface TextBlockContent : BlockContent {
     val richText: List<InlineContent>
@@ -65,4 +66,24 @@ sealed interface BlockIcon {
     }
 
     data class Media(val source: MediaSource) : BlockIcon
+
+    data class Native(
+        val name: String,
+        val color: ColorToken?,
+    ) : BlockIcon {
+        init {
+            require(name.isNotBlank()) { "native icon name must not be blank" }
+        }
+    }
+
+    data class CustomEmoji(
+        val externalId: String,
+        val name: String,
+        val source: MediaSource.External,
+    ) : BlockIcon {
+        init {
+            require(externalId.isNotBlank()) { "custom emoji external id must not be blank" }
+            require(name.isNotBlank()) { "custom emoji name must not be blank" }
+        }
+    }
 }

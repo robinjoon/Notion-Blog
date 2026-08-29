@@ -104,7 +104,7 @@ internal class BlockTreeSnapshotMapper {
         is MediaBlockContent.LinkPreview -> "link_preview"
         is MediaBlockContent.Embed -> "embed"
         is ReusableBlockContent.Synchronized -> "synchronized"
-        ReusableBlockContent.Template -> "template"
+        is ReusableBlockContent.Template -> "template"
         is SpecialBlockContent.MeetingNotes -> "meeting_notes"
         is UnsupportedBlockContent -> "unsupported"
     }
@@ -175,6 +175,7 @@ internal class BlockTreeSnapshotMapper {
                 set("richText", toJsonInlineList(content.richText))
                 put("startNumber", content.startNumber)
                 put("displayFormat", content.displayFormat.logicalValue())
+                put("startsNewList", content.startsNewList)
             }
 
             is ListBlockContent.ToDoItem -> {
@@ -182,7 +183,7 @@ internal class BlockTreeSnapshotMapper {
                 put("checked", content.checked)
             }
 
-            LayoutBlockContent.Divider, LayoutBlockContent.ColumnList, LayoutBlockContent.TabContainer, ReferenceBlockContent.TableOfContents, ReusableBlockContent.Template -> Unit
+            LayoutBlockContent.Divider, LayoutBlockContent.ColumnList, LayoutBlockContent.TabContainer, ReferenceBlockContent.TableOfContents -> Unit
 
             is LayoutBlockContent.Column -> set("width", content.width?.let { numberNode(it.ratio) } ?: nullNode())
 
@@ -212,6 +213,7 @@ internal class BlockTreeSnapshotMapper {
             is ReferenceBlockContent.DatabaseLink -> {
                 set("reference", toJsonReference(content.reference))
                 set("originalUrl", content.originalUrl?.let { jsonString(it.toString()) } ?: nullNode())
+                set("title", content.title?.let(::jsonString) ?: nullNode())
             }
 
             is ReferenceBlockContent.Breadcrumb -> set("items", arrayNode().also { items -> content.items.forEach { items.add(toJsonLink(it)) } })
@@ -237,6 +239,8 @@ internal class BlockTreeSnapshotMapper {
 
             is ReusableBlockContent.Synchronized -> set("origin", content.origin?.let(::toJsonOrigin) ?: nullNode())
 
+            is ReusableBlockContent.Template -> set("title", toJsonInlineList(content.title))
+
             is SpecialBlockContent.MeetingNotes -> {
                 put("title", content.title)
                 put("status", content.status.logicalValue())
@@ -250,35 +254,74 @@ internal class BlockTreeSnapshotMapper {
 
     private fun fromJsonContent(kind: String, content: ObjectNode): BlockContent = when (kind) {
         "paragraph" -> TextBlockContent.Paragraph(content.requiredInlineList("richText", kind))
+
         "heading" -> TextBlockContent.Heading(content.requiredEnum("level", kind, ::headingLevel), content.requiredInlineList("richText", kind), content.requiredBoolean("isToggleable", kind))
+
         "quote" -> TextBlockContent.Quote(content.requiredInlineList("richText", kind))
+
         "toggle" -> TextBlockContent.Toggle(content.requiredInlineList("richText", kind))
+
         "callout" -> TextBlockContent.Callout(content.requiredInlineList("richText", kind), content.optionalObject("icon")?.let(::fromJsonIcon))
+
         "code" -> TextBlockContent.Code(content.requiredInlineList("richText", kind), content.requiredText("language", kind), content.requiredInlineList("caption", kind))
+
         "equation" -> TextBlockContent.Equation(content.requiredText("expression", kind))
+
         "bulleted_list_item" -> ListBlockContent.BulletedItem(content.requiredInlineList("richText", kind))
-        "numbered_list_item" -> ListBlockContent.NumberedItem(content.requiredInlineList("richText", kind), content.requiredInt("startNumber", kind), content.requiredEnum("displayFormat", kind, ::numberedListFormat))
+
+        "numbered_list_item" -> ListBlockContent.NumberedItem(
+            richText = content.requiredInlineList("richText", kind),
+            startNumber = content.requiredInt("startNumber", kind),
+            displayFormat = content.requiredEnum("displayFormat", kind, ::numberedListFormat),
+            startsNewList = content.optionalBoolean("startsNewList") ?: false,
+        )
+
         "to_do" -> ListBlockContent.ToDoItem(content.requiredInlineList("richText", kind), content.requiredBoolean("checked", kind))
+
         "divider" -> LayoutBlockContent.Divider
+
         "column_list" -> LayoutBlockContent.ColumnList
+
         "column" -> LayoutBlockContent.Column(content.optionalDouble("width")?.let(::WidthToken))
+
         "tab_container" -> LayoutBlockContent.TabContainer
+
         "tab_item" -> LayoutBlockContent.TabItem(content.requiredInlineList("title", kind), content.optionalObject("icon")?.let(::fromJsonIcon))
+
         "table" -> LayoutBlockContent.Table(content.requiredInt("width", kind), content.requiredBoolean("hasColumnHeader", kind), content.requiredBoolean("hasRowHeader", kind))
+
         "table_row" -> LayoutBlockContent.TableRow(content.requiredArray("cells", kind).toList().map { it.requireArray("$kind cell").toList().map(::fromJsonInline) })
+
         "child_post" -> ReferenceBlockContent.ChildPost(content.requiredText("title", kind), fromJsonReference(content.requiredObject("reference", kind)))
+
         "document_link" -> ReferenceBlockContent.DocumentLink(fromJsonReference(content.requiredObject("reference", kind)), content.optionalUri("originalUrl"))
-        "database_link" -> ReferenceBlockContent.DatabaseLink(fromJsonReference(content.requiredObject("reference", kind)), content.optionalUri("originalUrl"))
+
+        "database_link" -> ReferenceBlockContent.DatabaseLink(
+            reference = fromJsonReference(content.requiredObject("reference", kind)),
+            originalUrl = content.optionalUri("originalUrl"),
+            title = content.optionalText("title"),
+        )
+
         "breadcrumb" -> ReferenceBlockContent.Breadcrumb(content.requiredArray("items", kind).toList().map(::fromJsonLink))
+
         "table_of_contents" -> ReferenceBlockContent.TableOfContents
+
         "media" -> MediaBlockContent.Media(content.requiredEnum("mediaType", kind, ::mediaType), fromJsonMediaSource(content.requiredObject("source", kind)), content.optionalText("fileName"), content.requiredInlineList("caption", kind))
+
         "bookmark" -> MediaBlockContent.Bookmark(content.requiredUri("url", kind), content.requiredInlineList("caption", kind))
+
         "link_preview" -> MediaBlockContent.LinkPreview(content.requiredUri("url", kind))
+
         "embed" -> MediaBlockContent.Embed(content.requiredUri("url", kind), content.requiredInlineList("caption", kind))
+
         "synchronized" -> ReusableBlockContent.Synchronized(content.optionalObject("origin")?.let(::fromJsonOrigin))
-        "template" -> ReusableBlockContent.Template
+
+        "template" -> ReusableBlockContent.Template(content.optionalInlineList("title"))
+
         "meeting_notes" -> SpecialBlockContent.MeetingNotes(content.requiredText("title", kind), content.requiredEnum("status", kind, ::meetingNotesStatus), content.requiredInlineList("summary", kind), content.optionalObject("notesReference")?.let(::fromJsonLink))
+
         "unsupported" -> UnsupportedBlockContent(content.requiredText("blockType", kind))
+
         else -> UnsupportedBlockContent(kind)
     }
 
@@ -420,13 +463,42 @@ internal class BlockTreeSnapshotMapper {
                 put("kind", "media")
                 set("source", toJsonMediaSource(icon.source))
             }
+
+            is BlockIcon.Native -> {
+                put("kind", "native")
+                put("name", icon.name)
+                set("color", icon.color?.let { jsonString(it.logicalValue()) } ?: nullNode())
+            }
+
+            is BlockIcon.CustomEmoji -> {
+                put("kind", "custom_emoji")
+                put("externalId", icon.externalId)
+                put("name", icon.name)
+                set("source", toJsonMediaSource(icon.source))
+            }
         }
     }
 
     private fun fromJsonIcon(node: ObjectNode): BlockIcon = when (val kind = node.requiredText("kind", "block icon")) {
         "emoji" -> BlockIcon.Emoji(node.requiredText("value", kind))
+
         "media" -> BlockIcon.Media(fromJsonMediaSource(node.requiredObject("source", kind)))
+
+        "native" -> BlockIcon.Native(node.requiredText("name", kind), node.optionalEnum("color", ::colorToken))
+
+        "custom_emoji" -> BlockIcon.CustomEmoji(
+            externalId = node.requiredText("externalId", kind),
+            name = node.requiredText("name", kind),
+            source = fromJsonExternalMediaSource(node.requiredObject("source", kind)),
+        )
+
         else -> throw IllegalArgumentException("unsupported block icon kind: $kind")
+    }
+
+    private fun fromJsonExternalMediaSource(node: ObjectNode): MediaSource.External {
+        val source = fromJsonMediaSource(node)
+        require(source is MediaSource.External) { "custom emoji source must be external" }
+        return source
     }
 
     private fun toJsonOrigin(origin: SynchronizedBlockOrigin): ObjectNode = objectNode().apply {
@@ -469,6 +541,12 @@ internal class BlockTreeSnapshotMapper {
         return value.asBoolean()
     }
 
+    private fun ObjectNode.optionalBoolean(name: String): Boolean? {
+        val value = get(name) ?: return null
+        require(value.isBoolean) { "$name must be a boolean" }
+        return value.asBoolean()
+    }
+
     private fun ObjectNode.requiredInt(name: String, context: String): Int {
         val value = requiredNode(name, context)
         require(value.canConvertToInt()) { "$context.$name must be an integer" }
@@ -497,6 +575,12 @@ internal class BlockTreeSnapshotMapper {
     private fun <T> ObjectNode.optionalEnum(name: String, parser: (String) -> T): T? = optionalText(name)?.let(parser)
 
     private fun ObjectNode.requiredInlineList(name: String, context: String): List<InlineContent> = requiredArray(name, context).toList().map(::fromJsonInline)
+
+    private fun ObjectNode.optionalInlineList(name: String): List<InlineContent> = get(name)
+        ?.requireArray(name)
+        ?.toList()
+        ?.map(::fromJsonInline)
+        .orEmpty()
 
     private fun ObjectNode.requiredNode(name: String, context: String): JsonNode = get(name)
         ?: throw IllegalArgumentException("$context.$name is required")

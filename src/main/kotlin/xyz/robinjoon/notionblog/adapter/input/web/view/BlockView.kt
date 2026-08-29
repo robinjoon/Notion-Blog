@@ -300,6 +300,7 @@ data class EmbedView(
     override val id: String,
     val provider: EmbedProviderView?,
     val url: String?,
+    val fallbackUrl: String?,
     val caption: List<InlineView>,
     override val style: BlockStyleView,
     override val children: List<BlockView>,
@@ -331,6 +332,7 @@ data class DocumentLinkView(
 
 data class DatabaseLinkView(
     override val id: String,
+    val title: String?,
     val link: LinkView?,
     val originalUrl: String?,
     override val style: BlockStyleView,
@@ -341,12 +343,17 @@ data class DatabaseLinkView(
 
 data class BreadcrumbView(
     override val id: String,
-    val items: List<LinkView>,
+    val items: List<BreadcrumbItemView>,
     override val style: BlockStyleView,
     override val children: List<BlockView>,
 ) : BlockView {
     override val kind = BlockKind.BREADCRUMB
 }
+
+data class BreadcrumbItemView(
+    val label: String,
+    val link: LinkView?,
+)
 
 data class TableOfContentsView(
     override val id: String,
@@ -372,6 +379,7 @@ data class SynchronizedOriginView(val sourceId: String, val documentId: String, 
 
 data class TemplateView(
     override val id: String,
+    val title: List<InlineView>,
     override val style: BlockStyleView,
     override val children: List<BlockView>,
 ) : BlockView {
@@ -406,3 +414,13 @@ sealed interface BlockIconView
 data class EmojiIconView(val value: String) : BlockIconView
 
 data class MediaIconView(val url: String?) : BlockIconView
+
+data class NativeIconView(
+    val name: String,
+    val colorClass: String?,
+) : BlockIconView
+
+data class CustomEmojiIconView(
+    val name: String,
+    val url: String?,
+) : BlockIconView

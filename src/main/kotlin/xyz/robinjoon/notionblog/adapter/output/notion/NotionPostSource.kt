@@ -1,5 +1,6 @@
 package xyz.robinjoon.notionblog.adapter.output.notion
 
+import tools.jackson.databind.JsonNode
 import xyz.robinjoon.notionblog.adapter.output.notion.client.NotionApiClient
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
 import xyz.robinjoon.notionblog.adapter.output.notion.mapping.NotionBlockMapper
@@ -71,22 +72,54 @@ internal class NotionPostSource(
         sourceDocument: SourceDocumentRef,
         startedAt: Long,
         state: TraversalState,
+        skipPreviouslyVisitedBlocks: Boolean = false,
     ): List<BlockNode> {
         if (depth > maxDepth) {
             throw SourceMappingException("Notion block nesting exceeds the configured maximum depth")
         }
+        if (!state.collectedChildrenParentIds.add(blockIdentity(parentBlockId))) {
+            return emptyList()
+        }
         checkDeadline(startedAt)
         val blocks = client.fetchDirectBlockChildren(parentBlockId)
         checkDeadline(startedAt)
-        return blocks.asSequence()
-            .filterNot(NotionBlockEnvelope::inTrash)
+        val activeBlocks = blocks.filterNot(NotionBlockEnvelope::inTrash)
+        activeBlocks.mapNotNullTo(state.transcriptBlockIds) { block -> meetingNotesSections(block).transcriptBlockId }
+        return activeBlocks.asSequence()
+            .filterNot { block -> blockIdentity(block.id) in state.transcriptBlockIds }
+            .filterNot { block -> skipPreviouslyVisitedBlocks && blockIdentity(block.id) in state.visitedBlockIds }
             .map { block ->
                 countAndVisit(block, state)
-                val children = if (block.hasChildren && block.type != CHILD_PAGE_TYPE) {
-                    collectChildren(block.id, depth + 1, block.type, sourceDocument, startedAt, state)
+                val ordinaryChildren = if (block.hasChildren && block.type != CHILD_PAGE_TYPE) {
+                    collectChildren(
+                        block.id,
+                        depth + 1,
+                        block.type,
+                        sourceDocument,
+                        startedAt,
+                        state,
+                        skipPreviouslyVisitedBlocks,
+                    )
                 } else {
                     emptyList()
                 }
+                val meetingSections = meetingNotesSections(block)
+                val sectionChildren = meetingSections.publicBlockIds
+                    .asSequence()
+                    .filterNot { sectionBlockId -> blockIdentity(sectionBlockId) in state.transcriptBlockIds }
+                    .flatMap { sectionBlockId ->
+                        collectChildren(
+                            sectionBlockId,
+                            depth + 1,
+                            block.type,
+                            sourceDocument,
+                            startedAt,
+                            state,
+                            skipPreviouslyVisitedBlocks = true,
+                        ).asSequence()
+                    }
+                    .toList()
+                val children = ordinaryChildren + sectionChildren
                 val mapped = if (parentType == TAB_TYPE && block.type == PARAGRAPH_TYPE) {
                     blockMapper.mapTabItem(block, children)
                 } else {
@@ -100,8 +133,50 @@ internal class NotionPostSource(
             .toList()
     }
 
+    private fun meetingNotesSections(block: NotionBlockEnvelope): MeetingNotesSections {
+        if (block.type != MEETING_NOTES_TYPE) {
+            return MeetingNotesSections.EMPTY
+        }
+        val children = block.payload.get("children") ?: return MeetingNotesSections.EMPTY
+        if (children.isNull) {
+            return MeetingNotesSections.EMPTY
+        }
+        if (!children.isObject) {
+            throw SourceMappingException("Notion meeting notes children must be an object or null")
+        }
+        val transcriptBlockId = children.optionalBlockId("transcript_block_id")
+        return MeetingNotesSections(
+            publicBlockIds = listOfNotNull(
+                children.optionalBlockId("summary_block_id"),
+                children.optionalBlockId("notes_block_id"),
+            ).distinct(),
+            transcriptBlockId = transcriptBlockId,
+        )
+    }
+
+    private fun JsonNode.optionalBlockId(field: String): String? {
+        val value = get(field) ?: return null
+        if (value.isNull) {
+            return null
+        }
+        if (!value.isString || value.stringValue().isBlank()) {
+            throw SourceMappingException("Notion meeting notes $field must be a nonblank block ID or null")
+        }
+        return try {
+            NotionIdNormalizer.normalize(value.stringValue())
+        } catch (exception: SourceMappingException) {
+            throw SourceMappingException("Notion meeting notes $field is malformed", exception)
+        }
+    }
+
+    private fun blockIdentity(value: String): String = try {
+        NotionIdNormalizer.normalize(value)
+    } catch (_: SourceMappingException) {
+        value
+    }
+
     private fun countAndVisit(block: NotionBlockEnvelope, state: TraversalState) {
-        if (!state.visitedBlockIds.add(block.id)) {
+        if (!state.visitedBlockIds.add(blockIdentity(block.id))) {
             throw SourceMappingException("Notion block collection contains a cycle or duplicate block")
         }
         state.blockCount += 1
@@ -145,12 +220,24 @@ internal class NotionPostSource(
     private class TraversalState(
         val visitedPageIds: MutableSet<String>,
         val visitedBlockIds: MutableSet<String> = mutableSetOf(),
+        val collectedChildrenParentIds: MutableSet<String> = mutableSetOf(),
+        val transcriptBlockIds: MutableSet<String> = mutableSetOf(),
         val containedChildren: MutableList<SourceDocumentRef> = mutableListOf(),
         var blockCount: Int = 0,
     )
 
+    private data class MeetingNotesSections(
+        val publicBlockIds: List<String>,
+        val transcriptBlockId: String?,
+    ) {
+        companion object {
+            val EMPTY = MeetingNotesSections(emptyList(), null)
+        }
+    }
+
     private companion object {
         const val CHILD_PAGE_TYPE = "child_page"
+        const val MEETING_NOTES_TYPE = "meeting_notes"
         const val PAGE_PARENT_TYPE = "page_id"
         const val PARAGRAPH_TYPE = "paragraph"
         const val TAB_TYPE = "tab"

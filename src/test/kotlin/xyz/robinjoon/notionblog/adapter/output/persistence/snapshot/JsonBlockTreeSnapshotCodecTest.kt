@@ -120,6 +120,47 @@ class JsonBlockTreeSnapshotCodecTest {
         }.withMessageContaining("paragraph")
     }
 
+    @Test
+    fun `decodes older schema version one snapshots with defaults for newly preserved block fields`() {
+        val decoded = codec.decode(
+            """
+            {
+              "schemaVersion": 1,
+              "kind": "block_tree_snapshot",
+              "blocks": [
+                {
+                  "id":"numbered",
+                  "kind":"numbered_list_item",
+                  "style":{},
+                  "content":{"richText":[],"startNumber":1,"displayFormat":"decimal"},
+                  "children":[]
+                },
+                {
+                  "id":"database",
+                  "kind":"database_link",
+                  "style":{},
+                  "content":{"reference":{"sourceId":"notion-main","externalId":"database-id"},"originalUrl":null},
+                  "children":[]
+                },
+                {
+                  "id":"template",
+                  "kind":"template",
+                  "style":{},
+                  "content":{},
+                  "children":[]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertThat(decoded.roots[0].content).isEqualTo(ListBlockContent.NumberedItem(emptyList()))
+        assertThat(decoded.roots[1].content).isEqualTo(
+            ReferenceBlockContent.DatabaseLink(SourceDocumentRef(SourceId("notion-main"), "database-id"), null),
+        )
+        assertThat(decoded.roots[2].content).isEqualTo(ReusableBlockContent.Template())
+    }
+
     private fun completeBlockTree(): BlockTree = BlockTree(
         listOf(
             node("paragraph", TextBlockContent.Paragraph(listOf(linkedText()))),
@@ -127,10 +168,12 @@ class JsonBlockTreeSnapshotCodecTest {
             node("quote", TextBlockContent.Quote(listOf(InlineContent.Equation("E=mc^2")))),
             node("toggle", TextBlockContent.Toggle(listOf(InlineContent.Text("Toggle")))),
             node("callout", TextBlockContent.Callout(listOf(InlineContent.Text("Callout")), BlockIcon.Media(MediaSource.External(URI("https://example.com/icon.png"))))),
+            node("native-icon", TextBlockContent.Callout(listOf(InlineContent.Text("Native")), BlockIcon.Native("library", ColorToken.BLUE))),
+            node("custom-emoji", TextBlockContent.Callout(listOf(InlineContent.Text("Custom")), BlockIcon.CustomEmoji("emoji-id", "parrot", MediaSource.External(URI("https://example.com/parrot.png"))))),
             node("code", TextBlockContent.Code(listOf(InlineContent.Text("println()")), "kotlin", listOf(InlineContent.Text("Caption")))),
             node("equation", TextBlockContent.Equation("a+b")),
             node("bullet", ListBlockContent.BulletedItem(listOf(InlineContent.Text("Bullet")))),
-            node("numbered", ListBlockContent.NumberedItem(listOf(InlineContent.Text("Numbered")), 3, NumberedListFormat.UPPER_ROMAN)),
+            node("numbered", ListBlockContent.NumberedItem(listOf(InlineContent.Text("Numbered")), 3, NumberedListFormat.UPPER_ROMAN, startsNewList = true)),
             node("todo", ListBlockContent.ToDoItem(listOf(InlineContent.Text("To do")), true)),
             node("divider", LayoutBlockContent.Divider),
             node("columns", LayoutBlockContent.ColumnList, children = listOf(node("column", LayoutBlockContent.Column(WidthToken(0.5))))),
@@ -138,7 +181,7 @@ class JsonBlockTreeSnapshotCodecTest {
             node("table", LayoutBlockContent.Table(1, hasColumnHeader = true, hasRowHeader = true), children = listOf(node("table-row", LayoutBlockContent.TableRow(listOf(listOf(InlineContent.Text("Cell"))))))),
             node("child-post", ReferenceBlockContent.ChildPost("Child", sourceReference)),
             node("document-link", ReferenceBlockContent.DocumentLink(sourceReference, URI("https://example.com/document"))),
-            node("database-link", ReferenceBlockContent.DatabaseLink(sourceReference, null)),
+            node("database-link", ReferenceBlockContent.DatabaseLink(sourceReference, null, "Database")),
             node("breadcrumb", ReferenceBlockContent.Breadcrumb(listOf(LinkTarget.ExternalUrl(URI("https://example.com")), LinkTarget.SourceDocument(sourceReference, null)))),
             node("table-of-contents", ReferenceBlockContent.TableOfContents),
             node("media", MediaBlockContent.Media(MediaType.PDF, MediaSource.SourceHosted(URI("https://example.com/file.pdf"), Instant.parse("2026-08-25T00:00:00Z")), "file.pdf", listOf(InlineContent.Text("PDF")))),
@@ -146,7 +189,7 @@ class JsonBlockTreeSnapshotCodecTest {
             node("link-preview", MediaBlockContent.LinkPreview(URI("https://example.com/preview"))),
             node("embed", MediaBlockContent.Embed(URI("https://example.com/embed"), listOf(InlineContent.Text("Embed")))),
             node("synchronized", ReusableBlockContent.Synchronized(SynchronizedBlockOrigin(sourceReference, "origin-block"))),
-            node("template", ReusableBlockContent.Template),
+            node("template", ReusableBlockContent.Template(listOf(InlineContent.Text("Template")))),
             node("meeting-notes", SpecialBlockContent.MeetingNotes("Meeting", MeetingNotesStatus.IN_PROGRESS, listOf(InlineContent.Mention("Jane", MentionKind.USER, target = LinkTarget.ExternalUrl(URI("https://example.com/jane")))), LinkTarget.SourceDocument(sourceReference, URI("https://example.com/notes")))),
             node("unsupported", UnsupportedBlockContent("future_type")),
         ),

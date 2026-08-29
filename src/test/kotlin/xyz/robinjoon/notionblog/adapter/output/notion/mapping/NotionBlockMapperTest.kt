@@ -9,9 +9,14 @@ import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
 import xyz.robinjoon.notionblog.application.port.output.source.SourceMappingException
 import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
+import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaType
+import xyz.robinjoon.notionblog.domain.post.block.content.NumberedListFormat
+import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.TextBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.UnsupportedBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
@@ -19,6 +24,7 @@ import xyz.robinjoon.notionblog.domain.post.block.inline.LinkTarget
 import xyz.robinjoon.notionblog.domain.post.block.media.MediaSource
 import xyz.robinjoon.notionblog.domain.post.block.style.ColorToken
 import xyz.robinjoon.notionblog.domain.source.SourceId
+import java.net.URI
 import java.time.Instant
 
 class NotionBlockMapperTest {
@@ -156,6 +162,89 @@ class NotionBlockMapperTest {
     }
 
     @Test
+    fun `maps numbered list start format and explicit restart marker`() {
+        val variants = listOf(
+            Triple("numbers", NumberedListFormat.DECIMAL, 1),
+            Triple("letters", NumberedListFormat.LOWER_ALPHA, 4),
+            Triple("roman", NumberedListFormat.LOWER_ROMAN, 5),
+        )
+
+        variants.forEach { (notionFormat, expectedFormat, startNumber) ->
+            val content = mapper.map(
+                envelope(
+                    type = "numbered_list_item",
+                    payload = """{"rich_text":[],"list_start_index":$startNumber,"list_format":"$notionFormat"}""",
+                ),
+            ).content as ListBlockContent.NumberedItem
+
+            assertThat(content.startNumber).isEqualTo(startNumber)
+            assertThat(content.displayFormat).isEqualTo(expectedFormat)
+            assertThat(content.startsNewList).isTrue()
+        }
+
+        assertThat(
+            mapper.map(envelope(type = "numbered_list_item", payload = """{"rich_text":[]}""")).content,
+        ).isEqualTo(ListBlockContent.NumberedItem(emptyList()))
+    }
+
+    @Test
+    fun `rejects an unknown numbered list format instead of silently changing its meaning`() {
+        assertThatThrownBy {
+            mapper.map(
+                envelope(
+                    type = "numbered_list_item",
+                    payload = """{"rich_text":[],"list_format":"future_format"}""",
+                ),
+            )
+        }.isInstanceOf(NotionBlockMappingException::class.java)
+    }
+
+    @Test
+    fun `preserves child database title and template rich text title`() {
+        val database = mapper.map(
+            envelope(
+                id = "database-external-id",
+                type = "child_database",
+                payload = """{"title":"Team projects"}""",
+            ),
+        ).content as ReferenceBlockContent.DatabaseLink
+        val template = mapper.map(
+            envelope(
+                type = "template",
+                payload = richTextPayload("Weekly review"),
+            ),
+        ).content as ReusableBlockContent.Template
+
+        assertThat(database.title).isEqualTo("Team projects")
+        assertThat(template.title).containsExactly(InlineContent.Text("Weekly review"))
+    }
+
+    @Test
+    fun `maps native and custom emoji icons without losing display metadata`() {
+        val native = mapper.map(
+            envelope(
+                type = "callout",
+                payload = """{"rich_text":[],"icon":{"type":"icon","icon":{"name":"library","color":"blue"}}}""",
+            ),
+        ).content as TextBlockContent.Callout
+        val customEmoji = mapper.map(
+            envelope(
+                type = "callout",
+                payload = """{"rich_text":[],"icon":{"type":"custom_emoji","custom_emoji":{"id":"emoji-id","name":"parrot","url":"https://example.com/parrot.png"}}}""",
+            ),
+        ).content as TextBlockContent.Callout
+
+        assertThat(native.icon).isEqualTo(BlockIcon.Native("library", ColorToken.BLUE))
+        assertThat(customEmoji.icon).isEqualTo(
+            BlockIcon.CustomEmoji(
+                externalId = "emoji-id",
+                name = "parrot",
+                source = MediaSource.External(URI("https://example.com/parrot.png")),
+            ),
+        )
+    }
+
+    @Test
     fun `rejects malformed known blocks but keeps an unknown type as a child preserving fallback`() {
         assertThatThrownBy { mapper.map(envelope(type = "code", payload = "{\"rich_text\":[]}")) }
             .isInstanceOf(NotionBlockMappingException::class.java)
@@ -241,6 +330,8 @@ class NotionBlockMapperTest {
         inTrash = false,
         payload = objectMapper.readTree(payload),
     )
+
+    private fun richTextPayload(content: String): String = """{"rich_text":[{"type":"text","text":{"content":"$content","link":null},"annotations":{"color":"default"},"plain_text":"$content","href":null}]}"""
 
     private fun readResource(path: String): String = checkNotNull(javaClass.classLoader.getResourceAsStream(path)) { "missing resource $path" }
         .bufferedReader()

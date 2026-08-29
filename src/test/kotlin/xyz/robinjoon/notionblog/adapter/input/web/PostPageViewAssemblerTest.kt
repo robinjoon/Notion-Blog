@@ -190,6 +190,209 @@ class PostPageViewAssemblerTest {
     }
 
     @Test
+    fun `starts a new ordered list only at an explicit numbered list boundary`() {
+        val rich = listOf(InlineContent.Text("item"))
+        val page = page(
+            nodes = listOf(
+                node("roman-3", ListBlockContent.NumberedItem(rich, 3, NumberedListFormat.UPPER_ROMAN, true)),
+                node("roman-4", ListBlockContent.NumberedItem(rich)),
+                node("alpha-7", ListBlockContent.NumberedItem(rich, 7, NumberedListFormat.LOWER_ALPHA, true)),
+                node("alpha-8", ListBlockContent.NumberedItem(rich)),
+            ),
+        )
+
+        val lists = assembler.assemble(page).post.blocks.filterIsInstance<ListView>()
+
+        assertThat(lists).hasSize(2)
+        assertThat(lists[0].startNumber).isEqualTo(3)
+        assertThat(lists[0].numberFormat).isEqualTo(xyz.robinjoon.notionblog.adapter.input.web.view.NumberedListFormatView.UPPER_ROMAN)
+        assertThat(lists[0].items).hasSize(2)
+        assertThat(lists[1].startNumber).isEqualTo(7)
+        assertThat(lists[1].numberFormat).isEqualTo(xyz.robinjoon.notionblog.adapter.input.web.view.NumberedListFormatView.LOWER_ALPHA)
+        assertThat(lists[1].items).hasSize(2)
+
+        val html = render(page)
+        assertThat(html).contains("<ol", "start=\"3\"", "type=\"I\"", "start=\"7\"", "type=\"a\"")
+    }
+
+    @Test
+    fun `renders every trusted icon kind and keeps equation source as progressive fallback`() {
+        val rich = listOf(InlineContent.Text("content"), InlineContent.Equation("x < y"))
+        val page = page(
+            nodes = listOf(
+                node("emoji", TextBlockContent.Callout(rich, BlockIcon.Emoji("💡"))),
+                node(
+                    "media",
+                    TextBlockContent.Callout(
+                        rich,
+                        BlockIcon.Media(MediaSource.External(URI("https://example.com/icon.png"))),
+                    ),
+                ),
+                node("native", TextBlockContent.Callout(rich, BlockIcon.Native("academic-cap", ColorToken.BLUE))),
+                BlockNode(
+                    BlockId("tabs"),
+                    LayoutBlockContent.TabContainer,
+                    children = listOf(
+                        BlockNode(
+                            BlockId("custom"),
+                            LayoutBlockContent.TabItem(
+                                listOf(InlineContent.Text("Custom tab")),
+                                BlockIcon.CustomEmoji(
+                                    "emoji-id",
+                                    "party-parrot",
+                                    MediaSource.External(URI("https://example.com/custom.gif")),
+                                ),
+                            ),
+                            children = listOf(node("panel", TextBlockContent.Equation("E = mc^2"))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).contains(
+            "notion-callout-icon",
+            "💡",
+            "https://example.com/icon.png",
+            "notion-native-icon",
+            "academic-cap",
+            "notion-color-blue",
+            "notion-tab-icon",
+            "https://example.com/custom.gif",
+            "notion-math-inline",
+            "notion-math-block",
+            "data-expression=\"E = mc^2\"",
+        )
+        assertThat(html).contains("x &lt; y", "E = mc^2")
+        assertThat(html).doesNotContain("x < y")
+    }
+
+    @Test
+    fun `derives an accessible breadcrumb and renders database and template titles with children`() {
+        val reference = SourceDocumentRef(SourceId("notion"), "database")
+        val page = page(
+            nodes = listOf(
+                node("breadcrumb", ReferenceBlockContent.Breadcrumb(emptyList())),
+                node("database", ReferenceBlockContent.DatabaseLink(reference, null, "Engineering wiki")),
+                BlockNode(
+                    BlockId("template"),
+                    ReusableBlockContent.Template(listOf(InlineContent.Text("Weekly review"))),
+                    children = listOf(node("template-child", TextBlockContent.Paragraph(listOf(InlineContent.Text("Prompt"))))),
+                ),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).contains(
+            "aria-label=\"Breadcrumb\"",
+            "href=\"/\"",
+            ">Home</a>",
+            "aria-current=\"page\">Post</span>",
+            "Engineering wiki",
+            "Weekly review",
+            "Prompt",
+        )
+    }
+
+    @Test
+    fun `canonicalizes supported embeds and degrades unsupported providers to a safe link`() {
+        val caption = listOf(InlineContent.Text("Watch externally"))
+        val page = page(
+            nodes = listOf(
+                node("youtube", MediaBlockContent.Embed(URI("http://www.youtube.com/watch?v=abc_123"), emptyList())),
+                node("vimeo", MediaBlockContent.Embed(URI("https://vimeo.com/987654321?autoplay=1"), emptyList())),
+                node("unknown", MediaBlockContent.Embed(URI("https://widgets.example.com/card?id=42"), caption)),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).contains(
+            "src=\"https://www.youtube-nocookie.com/embed/abc_123\"",
+            "src=\"https://player.vimeo.com/video/987654321\"",
+            "href=\"https://widgets.example.com/card?id=42\"",
+            ">Open embedded content</a>",
+            "Watch externally",
+            "sandbox=\"allow-scripts allow-same-origin allow-popups allow-presentation\"",
+            "allowfullscreen",
+            "referrerpolicy=\"strict-origin-when-cross-origin\"",
+        )
+        assertThat(Regex("<iframe\\b").findAll(html).count()).isEqualTo(2)
+        assertThat(html).doesNotContain("src=\"http://")
+    }
+
+    @Test
+    fun `uses figure captions only for figure content`() {
+        val caption = listOf(InlineContent.Text("Description"))
+        val page = page(
+            nodes = listOf(
+                node("bookmark", MediaBlockContent.Bookmark(URI("https://example.com/read"), caption)),
+                node("image", MediaBlockContent.Media(MediaType.IMAGE, MediaSource.External(URI("https://example.com/image.png")), "image.png", caption)),
+            ),
+        )
+
+        val html = render(page)
+        val bookmarkMarkup = html.substringAfter("id=\"bookmark\"").substringBefore("</aside>")
+        val imageMarkup = html.substringAfter("id=\"image\"").substringBefore("</figure>")
+
+        assertThat(bookmarkMarkup).contains("class=\"notion-caption\"").doesNotContain("<figcaption")
+        assertThat(imageMarkup).contains("<figcaption", "Description")
+    }
+
+    @Test
+    fun `keeps figure captions as the last child when figure blocks have nested content`() {
+        val caption = listOf(InlineContent.Text("Description"))
+        val page = page(
+            nodes = listOf(
+                BlockNode(
+                    BlockId("code"),
+                    TextBlockContent.Code(emptyList(), "kotlin", caption),
+                    children = listOf(node("code-nested", TextBlockContent.Paragraph(listOf(InlineContent.Text("Nested"))))),
+                ),
+                BlockNode(
+                    BlockId("image"),
+                    MediaBlockContent.Media(MediaType.IMAGE, MediaSource.External(URI("https://example.com/image.png")), "image.png", caption),
+                    children = listOf(node("image-nested", TextBlockContent.Paragraph(listOf(InlineContent.Text("Nested"))))),
+                ),
+                BlockNode(
+                    BlockId("embed"),
+                    MediaBlockContent.Embed(URI("https://vimeo.com/123"), caption),
+                    children = listOf(node("embed-nested", TextBlockContent.Paragraph(listOf(InlineContent.Text("Nested"))))),
+                ),
+            ),
+        )
+
+        val html = render(page)
+
+        listOf("code", "image", "embed").forEach { id ->
+            val figure = html.substringAfter("id=\"$id\"").substringBefore("</figure>")
+            assertThat(figure.substringAfter("<figcaption")).doesNotContain("notion-children")
+        }
+    }
+
+    @Test
+    fun `renders synchronized children without an extra placeholder and keeps an empty fallback`() {
+        val page = page(
+            nodes = listOf(
+                BlockNode(
+                    BlockId("synced-content"),
+                    ReusableBlockContent.Synchronized(null),
+                    children = listOf(node("synced-child", TextBlockContent.Paragraph(listOf(InlineContent.Text("Synced body"))))),
+                ),
+                node("synced-empty", ReusableBlockContent.Synchronized(null)),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).contains("Synced body")
+        assertThat(Regex("Synchronized content").findAll(html).count()).isEqualTo(1)
+    }
+
+    @Test
     fun `maps every normalized block subtype without dropping nested fallback children`() {
         val reference = SourceDocumentRef(SourceId("notion"), "reference")
         val rich = listOf(InlineContent.Text("text"))
@@ -222,11 +425,11 @@ class PostPageViewAssemblerTest {
                 node("embed", MediaBlockContent.Embed(URI("https://www.youtube.com/embed/id"), rich)),
                 node("child", ReferenceBlockContent.ChildPost("Child", reference)),
                 node("document", ReferenceBlockContent.DocumentLink(reference, URI("https://example.com/document"))),
-                node("database", ReferenceBlockContent.DatabaseLink(reference, URI("https://example.com/database"))),
+                node("database", ReferenceBlockContent.DatabaseLink(reference, URI("https://example.com/database"), "Database")),
                 node("breadcrumb", ReferenceBlockContent.Breadcrumb(listOf(LinkTarget.SourceDocument(reference, URI("https://example.com/breadcrumb"))))),
                 node("toc", ReferenceBlockContent.TableOfContents),
                 node("synced", ReusableBlockContent.Synchronized(SynchronizedBlockOrigin(reference, "origin"))),
-                node("template", ReusableBlockContent.Template),
+                node("template", ReusableBlockContent.Template(rich)),
                 node("meeting", SpecialBlockContent.MeetingNotes("Meeting", MeetingNotesStatus.COMPLETED, rich, null)),
                 BlockNode(BlockId("unsupported"), UnsupportedBlockContent("future_block"), children = listOf(node("fallback-child", TextBlockContent.Paragraph(rich)))),
             ),
@@ -280,6 +483,11 @@ class PostPageViewAssemblerTest {
     }
 
     private fun node(id: String, content: BlockContent): BlockNode = BlockNode(BlockId(id), content)
+
+    private fun render(page: BlogPage): String = templateEngine().process(
+        "blog/post",
+        Context().apply { setVariable("page", assembler.assemble(page)) },
+    )
 
     private fun templateEngine(): SpringTemplateEngine = SpringTemplateEngine().apply {
         setTemplateResolver(

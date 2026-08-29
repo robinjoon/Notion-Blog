@@ -69,6 +69,61 @@ class NotionPresentationAssetsContractTest {
         assertThat(script).doesNotContain("eval(", "Function(", "fetch(", "XMLHttpRequest", "<script", "onkeydown=")
     }
 
+    @Test
+    fun `ships enhancement overrides for todo markers icons full canvas and system dark palettes`() {
+        val css = resourceText("static/presentation/notion/enhancements/v1/notion-enhancements.css")
+
+        assertThat(css).contains(
+            "html",
+            "body",
+            "min-block-size: 100%",
+            ".notion-page",
+            "min-block-size: 100vh",
+            "body:has(> .notion-page.notion-color-mode-dark)",
+            ".notion-list-todo",
+            "list-style: none",
+            ".notion-callout-icon",
+            ".notion-tab-icon",
+            ".notion-native-icon",
+            ".notion-math",
+            "background: transparent",
+            "@media (prefers-color-scheme: dark)",
+            ".notion-page.notion-color-mode-system .notion-background-blue",
+            "background-color: #293b4a",
+            ".notion-page.notion-color-mode-system .notion-color-red",
+            "color: #ff8b8b",
+        )
+        assertThat(css).doesNotContain("javascript:", "url(http", "expression(")
+    }
+
+    @Test
+    fun `ships a no network math enhancement that preserves source on missing katex or render failure`() {
+        val script = resourceText("static/presentation/notion/math/v1/notion-math.js")
+
+        assertThat(script).contains(
+            "DOMContentLoaded",
+            "window.katex",
+            "katex.render",
+            "data-expression",
+            "displayMode",
+            "throwOnError: false",
+            "trust: false",
+            "output: \"mathml\"",
+            "textContent = source",
+        )
+        assertThat(script).doesNotContain(
+            "htmlAndMathml",
+            "eval(",
+            "Function(",
+            "fetch(",
+            "XMLHttpRequest",
+            "WebSocket",
+            "sendBeacon",
+            "innerHTML",
+            "<script",
+        )
+    }
+
     private fun resourceText(path: String): String = checkNotNull(javaClass.classLoader.getResource(path)) {
         "Missing presentation asset: $path"
     }.readText()
