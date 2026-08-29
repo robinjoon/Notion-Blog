@@ -13,8 +13,10 @@ import xyz.robinjoon.notionblog.application.port.output.source.RetryableSourceEx
 import xyz.robinjoon.notionblog.application.port.output.source.SourceConfigurationException
 import xyz.robinjoon.notionblog.application.port.output.source.SourceException
 import xyz.robinjoon.notionblog.application.port.output.source.SourceMappingException
+import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
+import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
 import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
 import xyz.robinjoon.notionblog.domain.source.SourceId
 import java.time.Duration
@@ -77,7 +79,14 @@ internal class NotionPostSource(
         if (depth > maxDepth) {
             throw SourceMappingException("Notion block nesting exceeds the configured maximum depth")
         }
-        if (!state.collectedChildrenParentIds.add(blockIdentity(parentBlockId))) {
+        val parentIdentity = blockIdentity(parentBlockId)
+        if (!skipPreviouslyVisitedBlocks) {
+            state.childrenByParentId[parentIdentity]?.let { children ->
+                validateDepth(children, depth)
+                return children
+            }
+        }
+        if (!state.collectedChildrenParentIds.add(parentIdentity)) {
             return emptyList()
         }
         checkDeadline(startedAt)
@@ -85,11 +94,12 @@ internal class NotionPostSource(
         checkDeadline(startedAt)
         val activeBlocks = blocks.filterNot(NotionBlockEnvelope::inTrash)
         activeBlocks.mapNotNullTo(state.transcriptBlockIds) { block -> meetingNotesSections(block).transcriptBlockId }
-        return activeBlocks.asSequence()
+        val collectedChildren = activeBlocks.asSequence()
             .filterNot { block -> blockIdentity(block.id) in state.transcriptBlockIds }
             .filterNot { block -> skipPreviouslyVisitedBlocks && blockIdentity(block.id) in state.visitedBlockIds }
             .map { block ->
                 countAndVisit(block, state)
+                reserveMaterializedBlock(state)
                 val ordinaryChildren = if (block.hasChildren && block.type != CHILD_PAGE_TYPE) {
                     collectChildren(
                         block.id,
@@ -119,7 +129,28 @@ internal class NotionPostSource(
                         ).asSequence()
                     }
                     .toList()
-                val children = ordinaryChildren + sectionChildren
+                val directChildren = ordinaryChildren + sectionChildren
+                val children = if (block.hasChildren && directChildren.isEmpty()) {
+                    synchronizedOriginBlockId(block, sourceDocument)
+                        ?.let { originBlockId ->
+                            copyForSynchronizedReference(
+                                referenceBlockId = block.id,
+                                children = collectChildren(
+                                    originBlockId,
+                                    depth + 1,
+                                    block.type,
+                                    sourceDocument,
+                                    startedAt,
+                                    state,
+                                ),
+                                startedAt = startedAt,
+                                state = state,
+                            )
+                        }
+                        ?: directChildren
+                } else {
+                    directChildren
+                }
                 val mapped = if (parentType == TAB_TYPE && block.type == PARAGRAPH_TYPE) {
                     blockMapper.mapTabItem(block, children)
                 } else {
@@ -131,6 +162,57 @@ internal class NotionPostSource(
                 mapped
             }
             .toList()
+        state.childrenByParentId[parentIdentity] = collectedChildren
+        return collectedChildren
+    }
+
+    private fun synchronizedOriginBlockId(
+        block: NotionBlockEnvelope,
+        sourceDocument: SourceDocumentRef,
+    ): String? {
+        if (block.type != SYNCED_BLOCK_TYPE) {
+            return null
+        }
+        val content = blockMapper.map(block, sourceDocument = sourceDocument).content
+        return (content as ReusableBlockContent.Synchronized).origin?.blockExternalId
+    }
+
+    private fun copyForSynchronizedReference(
+        referenceBlockId: String,
+        children: List<BlockNode>,
+        startedAt: Long,
+        state: TraversalState,
+    ): List<BlockNode> {
+        val referenceIdentity = blockIdentity(referenceBlockId)
+        return children.map { child -> child.copyForSynchronizedReference(referenceIdentity, startedAt, state) }
+    }
+
+    private fun BlockNode.copyForSynchronizedReference(
+        referenceIdentity: String,
+        startedAt: Long,
+        state: TraversalState,
+    ): BlockNode {
+        reserveMaterializedBlock(state)
+        checkDeadline(startedAt)
+        return copy(
+            id = BlockId("synced:$referenceIdentity:${id.value}"),
+            children = children.map { child ->
+                child.copyForSynchronizedReference(referenceIdentity, startedAt, state)
+            },
+        )
+    }
+
+    private fun validateDepth(
+        children: List<BlockNode>,
+        depth: Int,
+    ) {
+        if (children.isEmpty()) {
+            return
+        }
+        if (depth > maxDepth) {
+            throw SourceMappingException("Notion block nesting exceeds the configured maximum depth")
+        }
+        children.forEach { child -> validateDepth(child.children, depth + 1) }
     }
 
     private fun meetingNotesSections(block: NotionBlockEnvelope): MeetingNotesSections {
@@ -185,6 +267,13 @@ internal class NotionPostSource(
         }
     }
 
+    private fun reserveMaterializedBlock(state: TraversalState) {
+        state.materializedBlockCount += 1
+        if (state.materializedBlockCount > maxBlockCount) {
+            throw SourceMappingException("Notion block collection exceeds the configured maximum count")
+        }
+    }
+
     private fun confirmContainedChild(
         block: NotionBlockEnvelope,
         sourceDocument: SourceDocumentRef,
@@ -221,9 +310,11 @@ internal class NotionPostSource(
         val visitedPageIds: MutableSet<String>,
         val visitedBlockIds: MutableSet<String> = mutableSetOf(),
         val collectedChildrenParentIds: MutableSet<String> = mutableSetOf(),
+        val childrenByParentId: MutableMap<String, List<BlockNode>> = mutableMapOf(),
         val transcriptBlockIds: MutableSet<String> = mutableSetOf(),
         val containedChildren: MutableList<SourceDocumentRef> = mutableListOf(),
         var blockCount: Int = 0,
+        var materializedBlockCount: Int = 0,
     )
 
     private data class MeetingNotesSections(
@@ -240,6 +331,7 @@ internal class NotionPostSource(
         const val MEETING_NOTES_TYPE = "meeting_notes"
         const val PAGE_PARENT_TYPE = "page_id"
         const val PARAGRAPH_TYPE = "paragraph"
+        const val SYNCED_BLOCK_TYPE = "synced_block"
         const val TAB_TYPE = "tab"
     }
 }

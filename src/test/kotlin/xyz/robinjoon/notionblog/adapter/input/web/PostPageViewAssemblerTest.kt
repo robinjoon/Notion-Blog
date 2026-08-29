@@ -190,6 +190,32 @@ class PostPageViewAssemblerTest {
     }
 
     @Test
+    fun `renders linked and unlinked inline content exactly once`() {
+        val page = page(
+            nodes = listOf(
+                node(
+                    "paragraph",
+                    TextBlockContent.Paragraph(
+                        listOf(
+                            InlineContent.Text(
+                                "unique-linked-inline",
+                                link = LinkTarget.ExternalUrl(URI("https://example.com/read")),
+                            ),
+                            InlineContent.Text("unique-plain-inline"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).containsOnlyOnce("unique-linked-inline")
+        assertThat(html).containsOnlyOnce("unique-plain-inline")
+        assertThat(html).contains("href=\"https://example.com/read\"", "target=\"_blank\"", "rel=\"noopener noreferrer\"")
+    }
+
+    @Test
     fun `starts a new ordered list only at an explicit numbered list boundary`() {
         val rich = listOf(InlineContent.Text("item"))
         val page = page(
@@ -390,7 +416,7 @@ class PostPageViewAssemblerTest {
     }
 
     @Test
-    fun `renders synchronized children without an extra placeholder and keeps an empty fallback`() {
+    fun `renders synchronized children without an extra placeholder and keeps empty fallbacks visible`() {
         val page = page(
             nodes = listOf(
                 BlockNode(
@@ -399,13 +425,44 @@ class PostPageViewAssemblerTest {
                     children = listOf(node("synced-child", TextBlockContent.Paragraph(listOf(InlineContent.Text("Synced body"))))),
                 ),
                 node("synced-empty", ReusableBlockContent.Synchronized(null)),
+                node(
+                    "synced-reference-empty",
+                    ReusableBlockContent.Synchronized(
+                        SynchronizedBlockOrigin(
+                            SourceDocumentRef(SourceId("notion"), "origin-document"),
+                            "origin-block",
+                        ),
+                    ),
+                ),
             ),
         )
 
         val html = render(page)
 
         assertThat(html).contains("Synced body")
-        assertThat(Regex("Synchronized content").findAll(html).count()).isEqualTo(1)
+        assertThat(Regex("Synchronized content").findAll(html).count()).isEqualTo(2)
+    }
+
+    @Test
+    fun `renders a human readable meeting notes status`() {
+        val page = page(
+            nodes = listOf(
+                node(
+                    "meeting",
+                    SpecialBlockContent.MeetingNotes(
+                        "Rendering review",
+                        MeetingNotesStatus.NOT_STARTED,
+                        emptyList(),
+                        null,
+                    ),
+                ),
+            ),
+        )
+
+        val html = render(page)
+
+        assertThat(html).contains(">Not started</p>")
+        assertThat(html).doesNotContain(">NOT_STARTED</p>")
     }
 
     @Test

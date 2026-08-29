@@ -398,7 +398,14 @@ data class MeetingNotesView(
     override val kind = BlockKind.MEETING_NOTES
 }
 
-enum class MeetingNotesStatusView { NOT_STARTED, IN_PROGRESS, COMPLETED, OTHER }
+enum class MeetingNotesStatusView(
+    val label: String,
+) {
+    NOT_STARTED("Not started"),
+    IN_PROGRESS("In progress"),
+    COMPLETED("Completed"),
+    OTHER("Status unavailable"),
+}
 
 data class UnsupportedView(
     override val id: String,

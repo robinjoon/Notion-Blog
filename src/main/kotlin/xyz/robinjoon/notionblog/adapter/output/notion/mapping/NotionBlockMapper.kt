@@ -358,9 +358,10 @@ internal class NotionBlockMapper(
                 originalUrl = href,
             )
 
-            "link_preview" -> mention.requiredObject("link_preview").safeUri("url").let(LinkTarget::ExternalUrl)
+            "link_preview" -> href?.let(LinkTarget::ExternalUrl)
+                ?: mention.requiredObject("link_preview").safeUri("url").let(LinkTarget::ExternalUrl)
 
-            else -> null
+            else -> href?.let(LinkTarget::ExternalUrl)
         }
         return InlineContent.Mention(
             label = node.requiredText("plain_text"),

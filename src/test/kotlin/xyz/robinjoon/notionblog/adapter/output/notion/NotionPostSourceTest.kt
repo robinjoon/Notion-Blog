@@ -121,6 +121,132 @@ class NotionPostSourceTest {
     }
 
     @Test
+    fun `copies collected origin children with stable reference scoped ids when direct children are empty`() {
+        val client = mockk<NotionApiClient>()
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+            synchronizedBlock(SECOND_SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+            synchronizedBlock(SYNCED_ORIGIN, hasChildren = true),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_ORIGIN) } returns listOf(
+            block("shared-child", "paragraph", payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } returns emptyList()
+        every { client.fetchDirectBlockChildren(SECOND_SYNCED_REFERENCE) } returns emptyList()
+
+        val firstImport = source(client).fetch(reference(ROOT))
+        val secondImport = source(client).fetch(reference(ROOT))
+
+        val synchronizedReference = firstImport.content.roots[0]
+        val secondSynchronizedReference = firstImport.content.roots[1]
+        val origin = firstImport.content.roots[2]
+        assertThat(origin.children.map { it.id.value }).containsExactly("shared-child")
+        assertThat(synchronizedReference.children.map { it.id.value })
+            .containsExactly("synced:$SYNCED_REFERENCE:shared-child")
+        assertThat(secondSynchronizedReference.children.map { it.id.value })
+            .containsExactly("synced:$SECOND_SYNCED_REFERENCE:shared-child")
+        assertThat(synchronizedReference.children.single().content).isSameAs(origin.children.single().content)
+        assertThat(secondImport.content.roots[0].children.map { it.id.value })
+            .containsExactlyElementsOf(synchronizedReference.children.map { it.id.value })
+        verify(exactly = 2) { client.fetchDirectBlockChildren(SYNCED_ORIGIN) }
+        verify(exactly = 2) { client.fetchDirectBlockChildren(SYNCED_REFERENCE) }
+        verify(exactly = 2) { client.fetchDirectBlockChildren(SECOND_SYNCED_REFERENCE) }
+    }
+
+    @Test
+    fun `does not fetch a synchronized origin when the reference supplies direct children`() {
+        val client = mockk<NotionApiClient>()
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } returns listOf(
+            block("reference-child", "paragraph", payload = """{"rich_text":[]}"""),
+        )
+
+        val imported = source(client).fetch(reference(ROOT))
+
+        assertThat(imported.content.roots.single().children.map { it.id.value }).containsExactly("reference-child")
+        verify(exactly = 0) { client.fetchDirectBlockChildren(SYNCED_ORIGIN) }
+    }
+
+    @Test
+    fun `applies depth limits when reusing synchronized origin children below a deeper reference`() {
+        val client = mockk<NotionApiClient>()
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_ORIGIN, hasChildren = true),
+            block("container", "toggle", hasChildren = true, payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_ORIGIN) } returns listOf(
+            block("origin-child", "paragraph", hasChildren = true, payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren("origin-child") } returns listOf(
+            block("origin-grandchild", "paragraph", payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren("container") } returns listOf(
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } returns emptyList()
+
+        assertThatThrownBy { source(client, maxDepth = 3).fetch(reference(ROOT)) }
+            .isInstanceOf(SourceMappingException::class.java)
+    }
+
+    @Test
+    fun `applies total block limits to synchronized reference copies`() {
+        val client = mockk<NotionApiClient>()
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_ORIGIN, hasChildren = true),
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+            block(CHILD, "child_page", payload = """{"title":"Sentinel"}"""),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_ORIGIN) } returns listOf(
+            block("origin-child", "paragraph", hasChildren = true, payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren("origin-child") } returns listOf(
+            block("origin-grandchild", "paragraph", payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } returns emptyList()
+        every { client.fetchPage(CHILD) } returns page(CHILD, parent = NotionPageParentResponse("page_id", ROOT))
+
+        assertThatThrownBy { source(client, maxBlockCount = 5).fetch(reference(ROOT)) }
+            .isInstanceOf(SourceMappingException::class.java)
+        verify(exactly = 0) { client.fetchPage(CHILD) }
+    }
+
+    @Test
+    fun `checks the collection deadline before copying cached synchronized children`() {
+        val client = mockk<NotionApiClient>()
+        var referenceChildrenFetched = false
+        var deadlineChecksAfterReferenceFetch = 0
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_ORIGIN, hasChildren = true),
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_ORIGIN) } returns listOf(
+            block("shared-child", "paragraph", payload = """{"rich_text":[]}"""),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } answers {
+            referenceChildrenFetched = true
+            emptyList()
+        }
+
+        assertThatThrownBy {
+            source(
+                client = client,
+                collectionTimeout = Duration.ofNanos(1),
+                nanoTime = {
+                    if (!referenceChildrenFetched || deadlineChecksAfterReferenceFetch++ == 0) 0 else 1
+                },
+            ).fetch(reference(ROOT))
+        }.isInstanceOf(RetryableSourceException::class.java)
+    }
+
+    @Test
     fun `collects meeting summary and notes recursively without fetching the transcript`() {
         val client = mockk<NotionApiClient>()
         every { client.fetchPage(ROOT) } returns page(ROOT)
@@ -379,6 +505,19 @@ class NotionPostSourceTest {
         )
     }
 
+    private fun synchronizedBlock(
+        id: String,
+        hasChildren: Boolean,
+        originBlockId: String? = null,
+    ) = block(
+        id = id,
+        type = "synced_block",
+        hasChildren = hasChildren,
+        payload = originBlockId
+            ?.let { """{"synced_from":{"type":"block_id","block_id":"$it"}}""" }
+            ?: """{"synced_from":null}""",
+    )
+
     private companion object {
         const val ROOT = "a0b1c2d3e4f56789abcdef0123456789"
         const val ROOT_DASHED_UPPER = "A0B1C2D3-E4F5-6789-ABCD-EF0123456789"
@@ -390,6 +529,9 @@ class NotionPostSourceTest {
         const val TRANSCRIPT = "66666666777788889999aaaaaaaaaaaa"
         const val TRANSCRIPT_DASHED_UPPER = "66666666-7777-8888-9999-AAAAAAAAAAAA"
         const val PRIVATE_TRANSCRIPT = "bbbbbbbbccccddddeeeeffffffffffff"
+        const val SYNCED_ORIGIN = "ccccccccddddeeeeffff000000000000"
+        const val SYNCED_REFERENCE = "ddddddddeeeeffff0000111111111111"
+        const val SECOND_SYNCED_REFERENCE = "eeeeeeeeffff00001111222222222222"
         const val OTHER_PARENT = "fedcba9876543210fedcba9876543210"
         const val OUTSIDE = "1234567890abcdef1234567890abcdef"
     }

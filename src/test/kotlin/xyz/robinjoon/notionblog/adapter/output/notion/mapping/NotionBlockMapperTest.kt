@@ -97,6 +97,67 @@ class NotionBlockMapperTest {
     }
 
     @Test
+    fun `preserves safe hrefs for non-page mentions while keeping page mentions as source documents`() {
+        val block = envelope(
+            type = "paragraph",
+            payload = """
+                {
+                  "rich_text": [
+                    {"type":"mention","mention":{"type":"page","page":{"id":"a1b2c3d4e5f64a5b8c9d0e1f2a3b4c5d"}},"annotations":{"color":"default"},"plain_text":"Page","href":"https://www.notion.so/page"},
+                    {"type":"mention","mention":{"type":"database","database":{"id":"database-1"}},"annotations":{"color":"default"},"plain_text":"Database","href":"https://www.notion.so/database"},
+                    {"type":"mention","mention":{"type":"data_source","data_source":{"id":"data-source-1"}},"annotations":{"color":"default"},"plain_text":"Data source","href":"https://www.notion.so/data-source"},
+                    {"type":"mention","mention":{"type":"user","user":{"id":"user-1"}},"annotations":{"color":"default"},"plain_text":"Ada","href":"https://www.notion.so/user"},
+                    {"type":"mention","mention":{"type":"agent","agent":{"id":"agent-1"}},"annotations":{"color":"default"},"plain_text":"Agent","href":"https://www.notion.so/agent"},
+                    {"type":"mention","mention":{"type":"date","date":{"start":"2026-01-01"}},"annotations":{"color":"default"},"plain_text":"Jan 1","href":"https://www.notion.so/date"},
+                    {"type":"mention","mention":{"type":"template_mention","template_mention":{"type":"template_mention_date","template_mention_date":"today"}},"annotations":{"color":"default"},"plain_text":"Today","href":"https://www.notion.so/template"},
+                    {"type":"mention","mention":{"type":"link_preview","link_preview":{"url":"https://example.com/preview"}},"annotations":{"color":"default"},"plain_text":"Preview","href":"https://www.notion.so/preview"},
+                    {"type":"mention","mention":{"type":"future_mention","future_mention":{}},"annotations":{"color":"default"},"plain_text":"Future","href":"https://www.notion.so/future"}
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val mentions = (mapper.map(block).content as TextBlockContent.Paragraph).richText
+            .map { it as InlineContent.Mention }
+
+        assertThat(mentions.first().target).isEqualTo(
+            LinkTarget.SourceDocument(
+                reference = xyz.robinjoon.notionblog.domain.source.SourceDocumentRef(
+                    SourceId("notion-main"),
+                    "a1b2c3d4e5f64a5b8c9d0e1f2a3b4c5d",
+                ),
+                originalUrl = URI("https://www.notion.so/page"),
+            ),
+        )
+        assertThat(mentions.drop(1).map { it.target }).containsExactly(
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/database")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/data-source")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/user")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/agent")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/date")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/template")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/preview")),
+            LinkTarget.ExternalUrl(URI("https://www.notion.so/future")),
+        )
+    }
+
+    @Test
+    fun `rejects an unsafe href on a non-page mention`() {
+        val block = envelope(
+            type = "paragraph",
+            payload = """
+                {"rich_text":[
+                  {"type":"mention","mention":{"type":"database","database":{"id":"database-1"}},"annotations":{"color":"default"},"plain_text":"Database","href":"javascript:alert(1)"}
+                ]}
+            """.trimIndent(),
+        )
+
+        assertThatThrownBy { mapper.map(block) }
+            .isInstanceOf(NotionBlockMappingException::class.java)
+            .hasMessage("URL must use http or https")
+    }
+
+    @Test
     fun `maps source hosted media expiry and external media type`() {
         val hosted = mapper.map(
             envelope(
