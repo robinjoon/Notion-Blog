@@ -374,6 +374,22 @@ class PostPageViewAssemblerTest {
     }
 
     @Test
+    fun `renders code content literally without template whitespace`() {
+        val source = "if (left < right && ready) {\n    return value\n}"
+        val page = page(
+            nodes = listOf(
+                node("code", TextBlockContent.Code(listOf(InlineContent.Text(source)), "kotlin", emptyList())),
+            ),
+        )
+
+        val html = render(page)
+        val codeMarkup = html.substringAfter("<pre><code>").substringBefore("</code></pre>")
+
+        assertThat(codeMarkup).isEqualTo("if (left &lt; right &amp;&amp; ready) {\n    return value\n}")
+        assertThat(codeMarkup).doesNotContain("<span")
+    }
+
+    @Test
     fun `renders synchronized children without an extra placeholder and keeps an empty fallback`() {
         val page = page(
             nodes = listOf(

@@ -173,7 +173,7 @@ class PostPageViewAssembler(
 
             is TextBlockContent.Callout -> CalloutView(id, iconView(content.icon), inlineViews(content.richText, links), style, children)
 
-            is TextBlockContent.Code -> CodeView(id, inlineViews(content.richText, links), codeLanguage(content.language), inlineViews(content.caption, links), style, children)
+            is TextBlockContent.Code -> CodeView(id, plainText(content.richText), codeLanguage(content.language), inlineViews(content.caption, links), style, children)
 
             is TextBlockContent.Equation -> BlockEquationView(id, content.expression, style, children)
 

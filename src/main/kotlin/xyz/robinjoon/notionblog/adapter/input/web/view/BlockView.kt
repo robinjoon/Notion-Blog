@@ -97,7 +97,7 @@ data class CalloutView(
 
 data class CodeView(
     override val id: String,
-    val content: List<InlineView>,
+    val content: String,
     val language: CodeLanguageView,
     val caption: List<InlineView>,
     override val style: BlockStyleView,
