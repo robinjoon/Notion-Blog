@@ -79,7 +79,7 @@ class TargetPersistenceSchemaIntegrationTest {
     }
 
     @Test
-    fun `keeps the original default profile immutable and activates the enhanced catalog-matched version`() {
+    fun `keeps earlier default profiles immutable and activates the three data view catalog-matched version`() {
         connection { connection ->
             val profiles = connection.prepareStatement(
                 "select profile_key, version, token_json, is_current, created_at from presentation_profile " +
@@ -103,12 +103,14 @@ class TargetPersistenceSchemaIntegrationTest {
                 }
             }
 
-            assertThat(profiles).hasSize(2)
-            assertThat(profiles.map(SeedProfile::version)).containsExactly(1, 2)
-            assertThat(profiles.map(SeedProfile::current)).containsExactly(false, true)
+            assertThat(profiles).hasSize(4)
+            assertThat(profiles.map(SeedProfile::version)).containsExactly(1, 2, 3, 4)
+            assertThat(profiles.map(SeedProfile::current)).containsExactly(false, false, false, true)
             assertThat(profiles.map(SeedProfile::createdAt)).containsExactly(
                 Instant.parse("2026-08-25T00:00:00Z"),
                 Instant.parse("2026-08-27T00:00:00Z"),
+                Instant.parse("2026-08-31T00:00:00Z"),
+                Instant.parse("2026-08-31T00:00:00Z"),
             )
             profiles.forEach { profile ->
                 assertThat(profile.key).isEqualTo("notion-default")
@@ -117,29 +119,7 @@ class TargetPersistenceSchemaIntegrationTest {
                 )
             }
 
-            val assets = connection.prepareStatement(
-                "select asset_kind, asset_key, asset_version, integrity, position from presentation_profile_asset " +
-                    "where presentation_profile_id = ? and presentation_profile_version = 2 " +
-                    "order by case asset_kind when 'STYLE_SHEET' then 0 else 1 end, position",
-            ).use { statement ->
-                statement.setObject(1, DEFAULT_PROFILE_ID)
-                statement.executeQuery().use { rows ->
-                    buildList {
-                        while (rows.next()) {
-                            add(
-                                SeedAsset(
-                                    rows.getString("asset_kind"),
-                                    rows.getString("asset_key"),
-                                    rows.getLong("asset_version"),
-                                    rows.getString("integrity"),
-                                    rows.getInt("position"),
-                                ),
-                            )
-                        }
-                    }
-                }
-            }
-
+            val assets = profileAssets(connection, 4)
             val configuredIntegrity = configuredAssetIntegrity()
 
             assertThat(assets).containsExactly(
@@ -147,32 +127,53 @@ class TargetPersistenceSchemaIntegrationTest {
                     "STYLE_SHEET",
                     "notion-core",
                     1,
-                    configuredIntegrity.getValue("notion-core"),
+                    configuredIntegrity.getValue("notion-core" to 1L),
                     0,
                 ),
                 SeedAsset(
                     "STYLE_SHEET",
                     "katex-styles",
                     1,
-                    configuredIntegrity.getValue("katex-styles"),
+                    configuredIntegrity.getValue("katex-styles" to 1L),
                     1,
                 ),
                 SeedAsset(
                     "STYLE_SHEET",
                     "notion-enhancements",
                     1,
-                    configuredIntegrity.getValue("notion-enhancements"),
+                    configuredIntegrity.getValue("notion-enhancements" to 1L),
                     2,
+                ),
+                SeedAsset(
+                    "STYLE_SHEET",
+                    "notion-database",
+                    2,
+                    configuredIntegrity.getValue("notion-database" to 2L),
+                    3,
                 ),
                 SeedAsset(
                     "SCRIPT",
                     "katex-runtime",
                     1,
-                    configuredIntegrity.getValue("katex-runtime"),
+                    configuredIntegrity.getValue("katex-runtime" to 1L),
                     0,
                 ),
-                SeedAsset("SCRIPT", "notion-tabs", 1, configuredIntegrity.getValue("notion-tabs"), 1),
-                SeedAsset("SCRIPT", "notion-math", 1, configuredIntegrity.getValue("notion-math"), 2),
+                SeedAsset("SCRIPT", "notion-tabs", 1, configuredIntegrity.getValue("notion-tabs" to 1L), 1),
+                SeedAsset("SCRIPT", "notion-math", 1, configuredIntegrity.getValue("notion-math" to 1L), 2),
+                SeedAsset("SCRIPT", "notion-database-behavior", 1, configuredIntegrity.getValue("notion-database-behavior" to 1L), 3),
+            )
+            val previousAssets = assets.filterNot { it.key == "notion-database-behavior" }.map { asset ->
+                if (asset.key == "notion-database") {
+                    asset.copy(version = 1, integrity = configuredIntegrity.getValue("notion-database" to 1L))
+                } else {
+                    asset
+                }
+            }
+            assertThat(profileAssets(connection, 3)).containsExactlyElementsOf(previousAssets)
+            assertThat(profileAssets(connection, 2)).containsExactlyElementsOf(previousAssets.filterNot { it.key == "notion-database" })
+            assertThat(profileAssets(connection, 1)).containsExactly(
+                SeedAsset("STYLE_SHEET", "notion-core", 1, configuredIntegrity.getValue("notion-core" to 1L), 0),
+                SeedAsset("SCRIPT", "notion-tabs", 1, configuredIntegrity.getValue("notion-tabs" to 1L), 0),
             )
 
             connection.prepareStatement(
@@ -187,6 +188,77 @@ class TargetPersistenceSchemaIntegrationTest {
                 assertThat(rows.getObject("last_error_kind")).isNull()
                 assertThat(rows.getBoolean("is_due")).isTrue()
                 assertThat(rows.next()).isFalse()
+            }
+        }
+    }
+
+    @Test
+    fun `upgrades sites using earlier default profiles without changing custom profile selections`() {
+        listOf(
+            DEFAULT_PROFILE_ID to 1L,
+            DEFAULT_PROFILE_ID to 2L,
+            DEFAULT_PROFILE_ID to 3L,
+            UUID.randomUUID() to 1L,
+        ).forEach { (profileId, previousVersion) ->
+            val schema = "profile_upgrade_" + UUID.randomUUID().toString().replace("-", "")
+            migrateSchema(schema, "4")
+            connection { connection ->
+                connection.createStatement().use { it.execute("set search_path to $schema") }
+                val publicationId = UUID.randomUUID()
+                insertPublication(connection, publicationId)
+                if (profileId != DEFAULT_PROFILE_ID) {
+                    insertProfile(connection, profileId, "custom-theme", previousVersion, true)
+                    connection.prepareStatement(
+                        "insert into presentation_profile_asset " +
+                            "(presentation_profile_id, presentation_profile_version, asset_kind, asset_key, asset_version, integrity, position) " +
+                            "values (?, ?, 'STYLE_SHEET', 'notion-database', 1, ?, 0)",
+                    ).use { statement ->
+                        statement.setObject(1, profileId)
+                        statement.setLong(2, previousVersion)
+                        statement.setString(3, configuredAssetIntegrity().getValue("notion-database" to 1L))
+                        statement.executeUpdate()
+                    }
+                }
+                insertSiteConfiguration(connection, 1.toShort(), publicationId, profileId, previousVersion)
+
+                migrateSchema(schema)
+
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("select presentation_profile_id, presentation_profile_version from site_configuration").use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getObject("presentation_profile_id", UUID::class.java)).isEqualTo(profileId)
+                        assertThat(rows.getLong("presentation_profile_version"))
+                            .isEqualTo(if (profileId == DEFAULT_PROFILE_ID) 4L else previousVersion)
+                        assertThat(rows.next()).isFalse()
+                    }
+                }
+                if (profileId != DEFAULT_PROFILE_ID) {
+                    connection.prepareStatement("select is_current, token_json from presentation_profile where presentation_profile_id = ? and version = ?").use { statement ->
+                        statement.setObject(1, profileId)
+                        statement.setLong(2, previousVersion)
+                        statement.executeQuery().use { rows ->
+                            assertThat(rows.next()).isTrue()
+                            assertThat(rows.getBoolean("is_current")).isTrue()
+                            assertThat(jsonMapper.readTree(rows.getString("token_json"))).isEqualTo(jsonMapper.readTree("{}"))
+                        }
+                    }
+                    connection.prepareStatement(
+                        "select asset_kind, asset_key, asset_version, integrity, position from presentation_profile_asset " +
+                            "where presentation_profile_id = ? and presentation_profile_version = ?",
+                    ).use { statement ->
+                        statement.setObject(1, profileId)
+                        statement.setLong(2, previousVersion)
+                        statement.executeQuery().use { rows ->
+                            assertThat(rows.next()).isTrue()
+                            assertThat(rows.getString("asset_kind")).isEqualTo("STYLE_SHEET")
+                            assertThat(rows.getString("asset_key")).isEqualTo("notion-database")
+                            assertThat(rows.getLong("asset_version")).isEqualTo(1L)
+                            assertThat(rows.getString("integrity")).isEqualTo(configuredAssetIntegrity().getValue("notion-database" to 1L))
+                            assertThat(rows.getInt("position")).isZero()
+                            assertThat(rows.next()).isFalse()
+                        }
+                    }
+                }
             }
         }
     }
@@ -333,6 +405,41 @@ class TargetPersistenceSchemaIntegrationTest {
         }
     }
 
+    private fun profileAssets(connection: Connection, version: Long): List<SeedAsset> = connection.prepareStatement(
+        "select asset_kind, asset_key, asset_version, integrity, position from presentation_profile_asset " +
+            "where presentation_profile_id = ? and presentation_profile_version = ? " +
+            "order by case asset_kind when 'STYLE_SHEET' then 0 else 1 end, position",
+    ).use { statement ->
+        statement.setObject(1, DEFAULT_PROFILE_ID)
+        statement.setLong(2, version)
+        statement.executeQuery().use { rows ->
+            buildList {
+                while (rows.next()) {
+                    add(
+                        SeedAsset(
+                            rows.getString("asset_kind"),
+                            rows.getString("asset_key"),
+                            rows.getLong("asset_version"),
+                            rows.getString("integrity"),
+                            rows.getInt("position"),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun migrateSchema(schema: String, target: String = "latest") {
+        Flyway.configure()
+            .dataSource(database.jdbcUrl, database.username, database.password)
+            .locations("classpath:db/migration")
+            .schemas(schema)
+            .defaultSchema(schema)
+            .target(target)
+            .load()
+            .migrate()
+    }
+
     private fun columnType(connection: Connection, table: String, column: String): String = connection.prepareStatement(
         "select data_type from information_schema.columns where table_schema = 'public' and table_name = ? and column_name = ?",
     ).use { statement ->
@@ -447,7 +554,7 @@ class TargetPersistenceSchemaIntegrationTest {
         DriverManager.getConnection(database.jdbcUrl, database.username, database.password).use(block)
     }
 
-    private fun configuredAssetIntegrity(): Map<String, String> {
+    private fun configuredAssetIntegrity(): Map<Pair<String, Long>, String> {
         val properties = YamlPropertiesFactoryBean().apply {
             setResources(ClassPathResource("application.yml"))
         }.getObject()!!
@@ -455,7 +562,7 @@ class TargetPersistenceSchemaIntegrationTest {
             .map { index ->
                 val prefix = "blog.presentation.assets[$index]"
                 val key = properties.getProperty("$prefix.key") ?: return@map null
-                key to properties.getProperty("$prefix.integrity")
+                (key to properties.getProperty("$prefix.version").toLong()) to properties.getProperty("$prefix.integrity")
             }
             .takeWhile { it != null }
             .filterNotNull()

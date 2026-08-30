@@ -9,8 +9,11 @@ import org.junit.jupiter.api.Test
 import tools.jackson.databind.json.JsonMapper
 import xyz.robinjoon.notionblog.adapter.output.notion.client.NotionApiClient
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseViewResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPageParentResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPageResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPaginationResponse
 import xyz.robinjoon.notionblog.application.model.ImportedPublicationStatus
 import xyz.robinjoon.notionblog.application.port.output.source.RetryableSourceException
 import xyz.robinjoon.notionblog.application.port.output.source.SourceAccessException
@@ -169,6 +172,28 @@ class NotionPostSourceTest {
 
         assertThat(imported.content.roots.single().children.map { it.id.value }).containsExactly("reference-child")
         verify(exactly = 0) { client.fetchDirectBlockChildren(SYNCED_ORIGIN) }
+    }
+
+    @Test
+    fun `does not fetch a synchronized origin when all direct database children are intentionally excluded`() {
+        val client = mockk<NotionApiClient>()
+        every { client.fetchPage(ROOT) } returns page(ROOT)
+        every { client.fetchDirectBlockChildren(ROOT) } returns listOf(
+            synchronizedBlock(SYNCED_REFERENCE, hasChildren = true, originBlockId = SYNCED_ORIGIN),
+        )
+        every { client.fetchDirectBlockChildren(SYNCED_REFERENCE) } returns listOf(
+            block(CHILD, "child_database", hasChildren = true, payload = """{"title":"Excluded database"}"""),
+        )
+        every { client.fetchDatabase(CHILD) } returns NotionDatabaseResponse(CHILD, "Excluded database", null, false)
+        every { client.fetchDatabaseViews(CHILD, null) } returns NotionPaginationResponse(listOf(OUTSIDE), false, null)
+        every { client.fetchDatabaseView(OUTSIDE) } returns NotionDatabaseViewResponse(OUTSIDE, CHILD, "Board", "board", null, null)
+        every { client.fetchDirectBlockChildren(SYNCED_ORIGIN) } throws SourceAccessException("origin must not be read")
+
+        val imported = source(client).fetch(reference(ROOT))
+
+        assertThat(imported.content.roots.single().children).isEmpty()
+        verify(exactly = 0) { client.fetchDirectBlockChildren(SYNCED_ORIGIN) }
+        verify(exactly = 0) { client.createViewQuery(any()) }
     }
 
     @Test

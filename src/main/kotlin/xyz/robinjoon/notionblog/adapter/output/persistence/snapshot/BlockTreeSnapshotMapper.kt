@@ -9,6 +9,15 @@ import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardLayout
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardSize
+import xyz.robinjoon.notionblog.domain.post.block.content.DataColumn
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCoverAspect
+import xyz.robinjoon.notionblog.domain.post.block.content.DataGalleryOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataRow
+import xyz.robinjoon.notionblog.domain.post.block.content.DataSet
+import xyz.robinjoon.notionblog.domain.post.block.content.DataTableOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.HeadingLevel
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
@@ -94,6 +103,7 @@ internal class BlockTreeSnapshotMapper {
         is LayoutBlockContent.TabItem -> "tab_item"
         is LayoutBlockContent.Table -> "table"
         is LayoutBlockContent.TableRow -> "table_row"
+        is DataViewContent -> "data_view"
         is ReferenceBlockContent.ChildPost -> "child_post"
         is ReferenceBlockContent.DocumentLink -> "document_link"
         is ReferenceBlockContent.DatabaseLink -> "database_link"
@@ -127,6 +137,8 @@ internal class BlockTreeSnapshotMapper {
         "tab_item",
         "table",
         "table_row",
+        "data_table",
+        "data_view",
         "child_post",
         "document_link",
         "database_link",
@@ -199,6 +211,37 @@ internal class BlockTreeSnapshotMapper {
             }
 
             is LayoutBlockContent.TableRow -> set("cells", arrayNode().also { cells -> content.cells.forEach { cells.add(toJsonInlineList(it)) } })
+
+            is DataViewContent -> {
+                set("data", toJsonDataSet(content.data))
+                when (content) {
+                    is DataViewContent.Table -> {
+                        put("layout", "table")
+                        set(
+                            "options",
+                            objectNode().apply {
+                                put("wrapCells", content.options.wrapCells)
+                                put("frozenColumns", content.options.frozenColumns)
+                                put("showVerticalLines", content.options.showVerticalLines)
+                            },
+                        )
+                    }
+
+                    is DataViewContent.ListView -> put("layout", "list")
+
+                    is DataViewContent.Gallery -> {
+                        put("layout", "gallery")
+                        set(
+                            "options",
+                            objectNode().apply {
+                                put("size", content.options.size.logicalValue())
+                                put("aspect", content.options.aspect.logicalValue())
+                                put("layout", content.options.layout.logicalValue())
+                            },
+                        )
+                    }
+                }
+            }
 
             is ReferenceBlockContent.ChildPost -> {
                 put("title", content.title)
@@ -292,6 +335,21 @@ internal class BlockTreeSnapshotMapper {
 
         "table_row" -> LayoutBlockContent.TableRow(content.requiredArray("cells", kind).toList().map { it.requireArray("$kind cell").toList().map(::fromJsonInline) })
 
+        "data_table" -> DataViewContent.Table(
+            DataSet(
+                title = content.requiredText("title", kind),
+                columns = content.requiredArray("columns", kind).toList().map { column ->
+                    require(column.isString) { "$kind column must be a string" }
+                    DataColumn(column.asString())
+                },
+                rows = content.requiredArray("rows", kind).toList().map { row ->
+                    DataRow(fromJsonDataCells(row.requireObject("$kind row")))
+                },
+            ),
+        )
+
+        "data_view" -> fromJsonDataView(content)
+
         "child_post" -> ReferenceBlockContent.ChildPost(content.requiredText("title", kind), fromJsonReference(content.requiredObject("reference", kind)))
 
         "document_link" -> ReferenceBlockContent.DocumentLink(fromJsonReference(content.requiredObject("reference", kind)), content.optionalUri("originalUrl"))
@@ -323,6 +381,99 @@ internal class BlockTreeSnapshotMapper {
         "unsupported" -> UnsupportedBlockContent(content.requiredText("blockType", kind))
 
         else -> UnsupportedBlockContent(kind)
+    }
+
+    private fun toJsonDataSet(data: DataSet): ObjectNode = objectNode().apply {
+        put("title", data.title)
+        set("titleColumnIndex", data.titleColumnIndex?.let { JsonNodeFactory.instance.numberNode(it) } ?: nullNode())
+        set(
+            "columns",
+            arrayNode().also { columns ->
+                data.columns.forEach { column ->
+                    columns.add(
+                        objectNode().apply {
+                            put("name", column.name)
+                            set("widthPixels", column.widthPixels?.let { JsonNodeFactory.instance.numberNode(it) } ?: nullNode())
+                            set("wrap", column.wrap?.let { JsonNodeFactory.instance.booleanNode(it) } ?: nullNode())
+                        },
+                    )
+                }
+            },
+        )
+        set(
+            "rows",
+            arrayNode().also { rows ->
+                data.rows.forEach { row ->
+                    rows.add(
+                        objectNode().apply {
+                            set("cells", arrayNode().also { cells -> row.cells.forEach { cells.add(toJsonInlineList(it)) } })
+                            set("link", row.link?.let(::toJsonLink) ?: nullNode())
+                            set("icon", row.icon?.let(::toJsonIcon) ?: nullNode())
+                            set("cover", row.cover?.let(::toJsonMediaSource) ?: nullNode())
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    private fun fromJsonDataView(content: ObjectNode): DataViewContent {
+        val data = fromJsonDataSet(content.requiredObject("data", "data view"))
+        return when (val layout = content.requiredText("layout", "data view")) {
+            "table" -> {
+                val options = content.requiredObject("options", "data table view")
+                DataViewContent.Table(
+                    data,
+                    DataTableOptions(
+                        wrapCells = options.requiredBoolean("wrapCells", "data table options"),
+                        frozenColumns = options.requiredInt("frozenColumns", "data table options"),
+                        showVerticalLines = options.requiredBoolean("showVerticalLines", "data table options"),
+                    ),
+                )
+            }
+
+            "list" -> DataViewContent.ListView(data)
+
+            "gallery" -> {
+                val options = content.requiredObject("options", "data gallery view")
+                DataViewContent.Gallery(
+                    data,
+                    DataGalleryOptions(
+                        size = options.requiredEnum("size", "data gallery options", ::dataCardSize),
+                        aspect = options.requiredEnum("aspect", "data gallery options", ::dataCoverAspect),
+                        layout = options.requiredEnum("layout", "data gallery options", ::dataCardLayout),
+                    ),
+                )
+            }
+
+            else -> throw IllegalArgumentException("unsupported data view layout: $layout")
+        }
+    }
+
+    private fun fromJsonDataSet(data: ObjectNode): DataSet = DataSet(
+        title = data.requiredText("title", "data set"),
+        columns = data.requiredArray("columns", "data set").toList().map { node ->
+            val column = node.requireObject("data column")
+            DataColumn(
+                name = column.requiredText("name", "data column"),
+                widthPixels = column.optionalInt("widthPixels"),
+                wrap = column.optionalBoolean("wrap"),
+            )
+        },
+        rows = data.requiredArray("rows", "data set").toList().map { node ->
+            val row = node.requireObject("data row")
+            DataRow(
+                cells = fromJsonDataCells(row),
+                link = row.optionalObject("link")?.let(::fromJsonLink),
+                icon = row.optionalObject("icon")?.let(::fromJsonIcon),
+                cover = row.optionalObject("cover")?.let(::fromJsonMediaSource),
+            )
+        },
+        titleColumnIndex = data.optionalInt("titleColumnIndex"),
+    )
+
+    private fun fromJsonDataCells(row: ObjectNode): List<List<InlineContent>> = row.requiredArray("cells", "data row").toList().map { cell ->
+        cell.requireArray("data cell").toList().map(::fromJsonInline)
     }
 
     private fun toJson(style: BlockStyle): ObjectNode = objectNode().apply {
@@ -542,15 +693,20 @@ internal class BlockTreeSnapshotMapper {
     }
 
     private fun ObjectNode.optionalBoolean(name: String): Boolean? {
-        val value = get(name) ?: return null
+        val value = get(name)?.takeUnless(JsonNode::isNull) ?: return null
         require(value.isBoolean) { "$name must be a boolean" }
         return value.asBoolean()
     }
 
     private fun ObjectNode.requiredInt(name: String, context: String): Int {
         val value = requiredNode(name, context)
-        require(value.canConvertToInt()) { "$context.$name must be an integer" }
+        require(value.isIntegralNumber && value.canConvertToInt()) { "$context.$name must be an integer" }
         return value.asInt()
+    }
+
+    private fun ObjectNode.optionalInt(name: String): Int? = get(name)?.takeUnless(JsonNode::isNull)?.let { value ->
+        require(value.isIntegralNumber && value.canConvertToInt()) { "$name must be an integer" }
+        value.asInt()
     }
 
     private fun ObjectNode.optionalDouble(name: String): Double? = get(name)?.takeUnless(JsonNode::isNull)?.let { value ->
@@ -604,6 +760,12 @@ internal class BlockTreeSnapshotMapper {
     private fun meetingNotesStatus(value: String): MeetingNotesStatus = enumValue(value, "meeting notes status") { MeetingNotesStatus.valueOf(it) }
 
     private fun mentionKind(value: String): MentionKind = enumValue(value, "mention kind") { MentionKind.valueOf(it) }
+
+    private fun dataCardSize(value: String): DataCardSize = enumValue(value, "data card size") { DataCardSize.valueOf(it) }
+
+    private fun dataCoverAspect(value: String): DataCoverAspect = enumValue(value, "data cover aspect") { DataCoverAspect.valueOf(it) }
+
+    private fun dataCardLayout(value: String): DataCardLayout = enumValue(value, "data card layout") { DataCardLayout.valueOf(it) }
 
     private fun <T> enumValue(value: String, label: String, resolver: (String) -> T): T = try {
         resolver(value.uppercase())

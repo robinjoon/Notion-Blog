@@ -16,6 +16,14 @@ import xyz.robinjoon.notionblog.adapter.input.web.view.ColumnListView
 import xyz.robinjoon.notionblog.adapter.input.web.view.ColumnView
 import xyz.robinjoon.notionblog.adapter.input.web.view.ColumnWidthClass
 import xyz.robinjoon.notionblog.adapter.input.web.view.CustomEmojiIconView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataColumnWidthClass
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataEntryView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataGalleryView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataListView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataPropertyView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataTableColumnView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataTableRowView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataTableView
 import xyz.robinjoon.notionblog.adapter.input.web.view.DatabaseLinkView
 import xyz.robinjoon.notionblog.adapter.input.web.view.DividerView
 import xyz.robinjoon.notionblog.adapter.input.web.view.DocumentLinkView
@@ -70,6 +78,12 @@ import xyz.robinjoon.notionblog.domain.post.Post
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardLayout
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardSize
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCoverAspect
+import xyz.robinjoon.notionblog.domain.post.block.content.DataGalleryOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataSet
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.HeadingLevel
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
@@ -207,6 +221,33 @@ class PostPageViewAssembler(
 
             is LayoutBlockContent.TableRow -> TableRowView(id, content.cells.map { inlineViews(it, links) }, style, children)
 
+            is DataViewContent.Table -> DataTableView(
+                id,
+                content.data.title,
+                content.data.columns.mapIndexed { index, column ->
+                    DataTableColumnView(column.name, DataColumnWidthClass.fromPixels(column.widthPixels), column.wrap ?: content.options.wrapCells, index < content.options.frozenColumns)
+                },
+                content.data.rows.map { row ->
+                    val rowLink = row.link?.let { linkView(it, links) }
+                    DataTableRowView(
+                        row.cells.mapIndexed { index, cell ->
+                            inlineViews(cell, links).let { inlines ->
+                                if (index == content.data.titleColumnIndex && rowLink != null) inlines.map { withLink(it, rowLink) } else inlines
+                            }
+                        },
+                        iconView(row.icon),
+                    )
+                },
+                content.data.titleColumnIndex,
+                content.options.frozenColumns,
+                content.options.showVerticalLines,
+                style,
+            )
+
+            is DataViewContent.ListView -> DataListView(id, content.data.title, dataEntries(content.data, links), style)
+
+            is DataViewContent.Gallery -> DataGalleryView(id, content.data.title, dataEntries(content.data, links), galleryClasses(content.options), style)
+
             is MediaBlockContent.Media -> MediaView(
                 id,
                 content.mediaType.view(),
@@ -321,6 +362,44 @@ class PostPageViewAssembler(
         toc: List<TableOfContentsEntryView>,
         documentTitle: String,
     ): TableRowView = assembleBlock(node, links, toc, documentTitle) as TableRowView
+
+    private fun dataEntries(data: DataSet, links: Map<LinkTarget.SourceDocument, LinkResolution>): List<DataEntryView> = data.rows.map { row ->
+        val title = data.titleColumnIndex?.let { row.cells[it] }.orEmpty()
+            .takeIf { plainText(it).isNotBlank() } ?: listOf(InlineContent.Text("Untitled"))
+        val rowLink = row.link?.let { linkView(it, links) }
+        DataEntryView(
+            inlineViews(title, links).map { if (rowLink != null) withLink(it, null) else it },
+            plainText(title),
+            rowLink,
+            iconView(row.icon),
+            row.cover?.let(::mediaUrl),
+            data.columns.mapIndexedNotNull { index, column ->
+                if (index == data.titleColumnIndex) null else DataPropertyView(column.name, inlineViews(row.cells[index], links))
+            },
+        )
+    }
+
+    private fun withLink(inline: InlineView, link: LinkView?): InlineView = when (inline) {
+        is TextInlineView -> inline.copy(link = link)
+        is MentionInlineView -> inline.copy(link = link)
+        is EquationInlineView -> inline
+    }
+
+    private fun galleryClasses(options: DataGalleryOptions): List<String> = listOf(
+        when (options.size) {
+            DataCardSize.SMALL -> "notion-data-gallery-small"
+            DataCardSize.MEDIUM -> "notion-data-gallery-medium"
+            DataCardSize.LARGE -> "notion-data-gallery-large"
+        },
+        when (options.aspect) {
+            DataCoverAspect.CONTAIN -> "notion-data-gallery-contain"
+            DataCoverAspect.COVER -> "notion-data-gallery-cover"
+        },
+        when (options.layout) {
+            DataCardLayout.LIST -> "notion-data-gallery-list"
+            DataCardLayout.COMPACT -> "notion-data-gallery-compact"
+        },
+    )
 
     private fun inlineViews(inlines: List<InlineContent>, links: Map<LinkTarget.SourceDocument, LinkResolution>): List<InlineView> = inlines.map { inline ->
         when (inline) {

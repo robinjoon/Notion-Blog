@@ -8,6 +8,15 @@ import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardLayout
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardSize
+import xyz.robinjoon.notionblog.domain.post.block.content.DataColumn
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCoverAspect
+import xyz.robinjoon.notionblog.domain.post.block.content.DataGalleryOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataRow
+import xyz.robinjoon.notionblog.domain.post.block.content.DataSet
+import xyz.robinjoon.notionblog.domain.post.block.content.DataTableOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.HeadingLevel
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
@@ -66,6 +75,175 @@ class JsonBlockTreeSnapshotCodecTest {
         )
 
         assertThat(codec.decode(codec.encode(tree))).isEqualTo(tree)
+    }
+
+    @Test
+    fun `round trips all data view layouts inside database tabs with typed options and row metadata`() {
+        val data = DataSet(
+            "Open tasks",
+            listOf(DataColumn("Name", 260, false), DataColumn("Details", 0, true)),
+            listOf(
+                DataRow(
+                    listOf(
+                        listOf(linkedText()),
+                        listOf(
+                            InlineContent.Equation("x^2", TextAnnotations(italic = true)),
+                            InlineContent.Mention("Tomorrow", MentionKind.DATE),
+                            InlineContent.Text("More", link = LinkTarget.ExternalUrl(URI("https://example.com/more"))),
+                        ),
+                    ),
+                    link = LinkTarget.ExternalUrl(URI("https://example.com/task")),
+                    icon = BlockIcon.Emoji("📌"),
+                    cover = MediaSource.SourceHosted(URI("https://example.com/cover.png"), Instant.parse("2026-09-01T00:00:00Z")),
+                ),
+                DataRow(listOf(emptyList(), emptyList())),
+            ),
+            titleColumnIndex = 0,
+        )
+        val views = listOf(
+            DataViewContent.Table(data, DataTableOptions(wrapCells = false, frozenColumns = 2, showVerticalLines = false)),
+            DataViewContent.ListView(data),
+            DataViewContent.Gallery(data, DataGalleryOptions(DataCardSize.LARGE, DataCoverAspect.CONTAIN, DataCardLayout.COMPACT)),
+        )
+        val tree = BlockTree(
+            listOf(
+                node(
+                    "database",
+                    ReferenceBlockContent.DatabaseLink(sourceReference, URI("https://example.com/database"), "Tasks"),
+                    children = listOf(
+                        node(
+                            "tabs",
+                            LayoutBlockContent.TabContainer,
+                            children = views.mapIndexed { index, view ->
+                                node(
+                                    "tab-$index",
+                                    LayoutBlockContent.TabItem(listOf(InlineContent.Text("Open tasks")), null),
+                                    children = listOf(node("data-view-$index", view)),
+                                )
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val encoded = codec.encode(tree)
+
+        assertThat(codec.decode(encoded)).isEqualTo(tree)
+        assertThat(encoded).contains("\"schemaVersion\":1", "\"kind\":\"data_view\"", "\"layout\":\"table\"", "\"layout\":\"list\"", "\"layout\":\"gallery\"")
+        assertThat(encoded).doesNotContain("data_table", "xyz.", "java.", "kotlin.", "@class", "\"type\"")
+    }
+
+    @Test
+    fun `round trips empty data views without dropping columns or default options`() {
+        val data = DataSet("No tasks", listOf(DataColumn("Name")), emptyList())
+        val tree = BlockTree(
+            listOf(
+                node("empty-table", DataViewContent.Table(data)),
+                node("empty-list", DataViewContent.ListView(data)),
+                node("empty-gallery", DataViewContent.Gallery(data)),
+            ),
+        )
+
+        assertThat(codec.decode(codec.encode(tree))).isEqualTo(tree)
+    }
+
+    @Test
+    fun `decodes an existing data table snapshot into the canonical table layout`() {
+        val decoded = codec.decode(
+            """
+            {
+              "schemaVersion": 1,
+              "kind": "block_tree_snapshot",
+              "blocks": [{
+                "id": "legacy-table",
+                "kind": "data_table",
+                "style": {},
+                "content": {
+                  "title": "Legacy tasks",
+                  "columns": ["Name", "Status"],
+                  "rows": [{"cells": [[{
+                    "kind": "text",
+                    "text": "Published row",
+                    "annotations": {"bold": true, "italic": false, "strikethrough": false, "underline": false, "code": false},
+                    "link": {"kind": "external_url", "url": "https://example.com/row"}
+                  }], []]}]
+                },
+                "children": []
+              }]
+            }
+            """.trimIndent(),
+        )
+
+        val expected = DataViewContent.Table(
+            DataSet(
+                "Legacy tasks",
+                listOf(DataColumn("Name"), DataColumn("Status")),
+                listOf(
+                    DataRow(
+                        listOf(
+                            listOf(InlineContent.Text("Published row", TextAnnotations(bold = true), LinkTarget.ExternalUrl(URI("https://example.com/row")))),
+                            emptyList(),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        assertThat(decoded.roots.single().content).isEqualTo(expected)
+        assertThat(codec.encode(decoded)).contains("\"kind\":\"data_view\"", "\"layout\":\"table\"").doesNotContain("data_table")
+    }
+
+    @Test
+    fun `rejects unsupported data view layouts and malformed layout options`() {
+        listOf(
+            "\"layout\":\"board\"" to "unsupported data view layout",
+            "\"layout\":\"table\",\"options\":{\"wrapCells\":true,\"frozenColumns\":2,\"showVerticalLines\":true}" to "frozen column count",
+            "\"layout\":\"table\",\"options\":{\"wrapCells\":true,\"frozenColumns\":0.5,\"showVerticalLines\":true}" to "integer",
+            "\"layout\":\"gallery\",\"options\":{\"size\":\"huge\",\"aspect\":\"cover\",\"layout\":\"list\"}" to "data card size",
+        ).forEach { (layout, message) ->
+            assertThatIllegalArgumentException().isThrownBy {
+                codec.decode(
+                    """{"schemaVersion":1,"kind":"block_tree_snapshot","blocks":[{"id":"bad-view","kind":"data_view","style":{},"content":{$layout,"data":{"title":"Tasks","columns":[{"name":"Name"}],"rows":[]}},"children":[]}]}""",
+                )
+            }.withMessageContaining(message)
+        }
+    }
+
+    @Test
+    fun `rejects malformed shared dataset fields instead of truncating or guessing`() {
+        listOf(
+            "\"columns\":[{\"name\":\"Name\",\"widthPixels\":12.5}],\"rows\":[]" to "integer",
+            "\"columns\":[{\"name\":\"Name\",\"wrap\":\"yes\"}],\"rows\":[]" to "boolean",
+            "\"columns\":[{\"name\":\"Name\"}],\"rows\":[],\"titleColumnIndex\":1" to "title column index",
+            "\"columns\":[{\"name\":\"Name\"}],\"rows\":[{\"cells\":[]}]" to "column count",
+        ).forEach { (fields, message) ->
+            assertThatIllegalArgumentException().isThrownBy {
+                codec.decode(
+                    """{"schemaVersion":1,"kind":"block_tree_snapshot","blocks":[{"id":"bad-data","kind":"data_view","style":{},"content":{"layout":"list","data":{"title":"Tasks",$fields}},"children":[]}]}""",
+                )
+            }.withMessageContaining(message)
+        }
+    }
+
+    @Test
+    fun `rejects data table snapshots with mismatched row widths`() {
+        assertThatIllegalArgumentException().isThrownBy {
+            codec.decode(
+                """
+                {
+                  "schemaVersion": 1,
+                  "kind": "block_tree_snapshot",
+                  "blocks": [{
+                    "id": "broken-data-table",
+                    "kind": "data_table",
+                    "style": {},
+                    "content": {"title": "Tasks", "columns": ["Name", "Status"], "rows": [{"cells": [[]]}]},
+                    "children": []
+                  }]
+                }
+                """.trimIndent(),
+            )
+        }.withMessage("data set rows must contain exactly the column count")
     }
 
     @Test
@@ -179,6 +357,9 @@ class JsonBlockTreeSnapshotCodecTest {
             node("columns", LayoutBlockContent.ColumnList, children = listOf(node("column", LayoutBlockContent.Column(WidthToken(0.5))))),
             node("tabs", LayoutBlockContent.TabContainer, children = listOf(node("tab", LayoutBlockContent.TabItem(listOf(InlineContent.Text("Tab")), BlockIcon.Emoji("📌"))))),
             node("table", LayoutBlockContent.Table(1, hasColumnHeader = true, hasRowHeader = true), children = listOf(node("table-row", LayoutBlockContent.TableRow(listOf(listOf(InlineContent.Text("Cell"))))))),
+            node("data-table", DataViewContent.Table(DataSet("Data", listOf(DataColumn("Name")), listOf(DataRow(listOf(listOf(linkedText()))))))),
+            node("data-list", DataViewContent.ListView(DataSet("Data", listOf(DataColumn("Name")), emptyList()))),
+            node("data-gallery", DataViewContent.Gallery(DataSet("Data", listOf(DataColumn("Name")), emptyList()))),
             node("child-post", ReferenceBlockContent.ChildPost("Child", sourceReference)),
             node("document-link", ReferenceBlockContent.DocumentLink(sourceReference, URI("https://example.com/document"))),
             node("database-link", ReferenceBlockContent.DatabaseLink(sourceReference, null, "Database")),

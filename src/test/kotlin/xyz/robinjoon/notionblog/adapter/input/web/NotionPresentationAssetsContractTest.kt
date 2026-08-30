@@ -124,6 +124,46 @@ class NotionPresentationAssetsContractTest {
         )
     }
 
+    @Test
+    fun `ships database table styling with bounded horizontal scrolling focus and theme tokens`() {
+        val css = resourceText("static/presentation/notion/database/v1/notion-database.css")
+
+        assertThat(css).contains(
+            ".notion-database",
+            ".notion-data-table-wrapper",
+            "max-inline-size: 100%",
+            "overflow-x: auto",
+            ".notion-data-table-wrapper:focus-visible",
+            "var(--notion-focus)",
+            ".notion-data-table caption",
+            ".notion-data-table-cell",
+            "overflow-wrap: anywhere",
+            ".notion-data-table-empty",
+            "var(--notion-text-muted)",
+            "var(--notion-border)",
+            "var(--notion-page)",
+            "@media (max-width: 720px)",
+        )
+        assertThat(css).doesNotContain("javascript:", "url(http", "expression(")
+    }
+
+    @Test
+    fun `ships three database layouts with bounded widths mobile cards and measured sticky columns`() {
+        val css = resourceText("static/presentation/notion/database/v2/notion-database.css")
+        val script = resourceText("static/presentation/notion/database/v2/notion-database.js")
+
+        assertThat(css).contains(
+            ".notion-data-list", ".notion-data-gallery", ".notion-data-card", ".notion-data-wrap", ".notion-data-nowrap",
+            ".notion-data-table-no-vertical-lines", "position: sticky", "overflow-x: auto", "overflow-wrap: anywhere",
+            "var(--notion-page)", "var(--notion-border)", "var(--notion-focus)", "@media (max-width: 720px)",
+            "object-fit: contain", "object-fit: cover", "grid-template-columns:",
+        )
+        (80..640 step 40).forEach { width -> assertThat(css).contains(".notion-data-width-$width") }
+        assertThat(script).contains("getBoundingClientRect", "ResizeObserver", "resize", "requestAnimationFrame", "data-frozen-columns", "style.left")
+        assertThat(script).doesNotContain("innerHTML", "eval(", "Function(", "fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "cssText", "setAttribute('style'")
+        assertThat(css).doesNotContain("javascript:", "url(http", "expression(")
+    }
+
     private fun resourceText(path: String): String = checkNotNull(javaClass.classLoader.getResource(path)) {
         "Missing presentation asset: $path"
     }.readText()

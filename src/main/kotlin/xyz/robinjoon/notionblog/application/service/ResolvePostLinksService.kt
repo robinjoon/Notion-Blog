@@ -6,6 +6,7 @@ import xyz.robinjoon.notionblog.application.port.output.persistence.PublicationR
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.MediaBlockContent
@@ -62,6 +63,11 @@ class ResolvePostLinksService(
             is LayoutBlockContent.TabItem -> collect(content.title, targets)
 
             is LayoutBlockContent.TableRow -> content.cells.forEach { collect(it, targets) }
+
+            is DataViewContent -> content.data.rows.forEach { row ->
+                row.cells.forEach { collect(it, targets) }
+                row.link?.let { collect(it, targets) }
+            }
 
             is MediaBlockContent.Media -> collect(content.caption, targets)
 

@@ -30,17 +30,27 @@ class DefaultPresentationAssetsContractTest {
             .filterNotNull()
             .toList()
 
-        assertThat(assets.map(ConfiguredAsset::key)).containsExactly(
-            "notion-core",
-            "katex-styles",
-            "notion-enhancements",
-            "katex-runtime",
-            "notion-tabs",
-            "notion-math",
+        assertThat(assets.map { it.key to it.version }).containsExactly(
+            "notion-core" to 1L,
+            "katex-styles" to 1L,
+            "notion-enhancements" to 1L,
+            "notion-database" to 1L,
+            "notion-database" to 2L,
+            "katex-runtime" to 1L,
+            "notion-tabs" to 1L,
+            "notion-math" to 1L,
+            "notion-database-behavior" to 1L,
         )
+        assertThat(assets.filterNot(ConfiguredAsset::current).map { it.key to it.version })
+            .containsExactly("notion-database" to 1L)
+        assertThat(assets.filter(ConfiguredAsset::current).groupBy(ConfiguredAsset::key).values)
+            .allSatisfy { versions -> assertThat(versions).hasSize(1) }
+        assertThat(assets.single { it.key == "notion-database" && it.current }.publicPath)
+            .isEqualTo("/presentation/notion/database/v2/notion-database.css")
+        assertThat(assets.single { it.key == "notion-database-behavior" }.publicPath)
+            .isEqualTo("/presentation/notion/database/v2/notion-database.js")
         assertThat(assets).allSatisfy { asset ->
             assertThat(asset.version).isPositive()
-            assertThat(asset.current).isTrue()
             assertThat(asset.mediaType).isIn("text/css", "application/javascript")
             val resource = classpathResource(asset.publicPath)
             assertThat(resource.exists()).describedAs(asset.publicPath).isTrue()

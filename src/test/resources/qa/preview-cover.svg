@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+  <rect width="720" height="420" fill="#e7ecde"/>
+  <circle cx="610" cy="90" r="180" fill="#c9d6ad"/>
+  <rect x="82" y="95" width="250" height="300" rx="12" fill="#fbfaf5" transform="rotate(-12 82 95)"/>
+  <rect x="268" y="48" width="250" height="300" rx="12" fill="#566b4c" transform="rotate(12 268 48)"/>
+  <path d="M300 130h128m-128 30h150m-150 30h96" stroke="#e7ecde" stroke-width="10" stroke-linecap="round"/>
+  <text x="74" y="352" font-family="sans-serif" font-size="36" fill="#304229">Published notes</text>
+</svg>
