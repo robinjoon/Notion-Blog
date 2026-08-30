@@ -51,6 +51,18 @@ blog:
         public-path: /presentation/notion/enhancements/v1/notion-enhancements.css
         media-type: text/css
         current: true
+      - key: notion-database
+        version: 1
+        integrity: sha384-wpjZ1AgfFhNgEf5oXEty9kkNbOZEaD6/03YoArov4Cu6Gb8TH5c4MglrC5tvClEz
+        public-path: /presentation/notion/database/v1/notion-database.css
+        media-type: text/css
+        current: false
+      - key: notion-database
+        version: 2
+        integrity: sha384-Byoo/32d7jkGQ7JNxVuHliHafA+p+T6pBDKa5QQB7qHS9LR/ibKc9wBtt/XyYJaA
+        public-path: /presentation/notion/database/v2/notion-database.css
+        media-type: text/css
+        current: true
       - key: katex-runtime
         version: 1
         integrity: sha384-AtrdNsnxl/75rvBneBVH7DtOvCxSVahR2zWqle1coBKd8DEmLoviqNeJSx64gNAs
@@ -67,6 +79,12 @@ blog:
         version: 1
         integrity: sha384-knQz/ThENhaPoCo7vG4+Zrmeh8Ut2aMQXiEOrgNMT/oxoT8PHnp+G/d+BDgJoScj
         public-path: /presentation/notion/math/v1/notion-math.js
+        media-type: application/javascript
+        current: true
+      - key: notion-database-behavior
+        version: 1
+        integrity: sha384-lG0eCTZ89mtvozPfU6CHLuBi7bmoXFxZBmN7IgVzOEz+hlWJRvikOx3YyBXdF7Qe
+        public-path: /presentation/notion/database/v2/notion-database.js
         media-type: application/javascript
         current: true
 

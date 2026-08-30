@@ -12,6 +12,10 @@ import xyz.robinjoon.notionblog.domain.post.PostId
 import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
+import xyz.robinjoon.notionblog.domain.post.block.content.DataColumn
+import xyz.robinjoon.notionblog.domain.post.block.content.DataRow
+import xyz.robinjoon.notionblog.domain.post.block.content.DataSet
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.TextBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
@@ -28,6 +32,30 @@ class ResolvePostLinksServiceTest {
     private val publicationRepository = mockk<PublicationRepository>()
     private val service = ResolvePostLinksService(postRepository, publicationRepository)
     private val publicationId = PublicationId(UUID.randomUUID())
+
+    @Test
+    fun `resolves cell and row links consistently across table list and gallery without creating publication members`() {
+        val reference = sourceDocument("cell")
+        val target = LinkTarget.SourceDocument(reference, URI("https://example.com/cell"))
+        val rowReference = sourceDocument("row")
+        val rowTarget = LinkTarget.SourceDocument(rowReference, URI("https://example.com/row"))
+        val postId = PostId(UUID.randomUUID())
+        every { postRepository.findBindingsBySourceDocuments(any()) } returns mapOf(reference to PostSourceBinding(postId, reference))
+        every { publicationRepository.findActiveMemberPostIds(publicationId, setOf(postId)) } returns setOf(postId)
+        val data = DataSet(
+            "View",
+            listOf(DataColumn("Name")),
+            listOf(DataRow(listOf(listOf(InlineContent.Text("Cell", link = target))), link = rowTarget)),
+        )
+        val views = listOf(DataViewContent.Table(data), DataViewContent.ListView(data), DataViewContent.Gallery(data))
+
+        views.forEachIndexed { index, view ->
+            val tree = BlockTree(listOf(BlockNode(BlockId("view-$index"), view)))
+            assertThat(service.resolve(publicationId, listOf(tree)))
+                .containsEntry(target, LinkResolution.Internal(postId))
+                .containsEntry(rowTarget, LinkResolution.External(URI("https://example.com/row")))
+        }
+    }
 
     @Test
     fun `resolves active member links internally without consulting availability`() {

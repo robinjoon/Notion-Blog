@@ -10,10 +10,21 @@ import org.springframework.web.client.RestClientResponseException
 import tools.jackson.databind.JsonNode
 import xyz.robinjoon.notionblog.adapter.output.notion.NotionFailureTranslator
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDataSourceResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseProperty
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseViewResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryAspect
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryCover
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryLayout
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGallerySize
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPageParentResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPageResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPaginationResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionSettingsRowResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionViewColumn
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionViewConfiguration
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionViewQueryResponse
 import java.net.URI
 import java.net.http.HttpClient
 import java.time.Duration
@@ -50,33 +61,168 @@ internal class NotionApiClient(
             .build()
     }
 
-    fun fetchPage(pageId: String): NotionPageResponse {
+    fun fetchPage(pageId: String, propertyIds: List<String> = emptyList()): NotionPageResponse {
         require(pageId.isNotBlank()) { "Notion page ID must not be blank" }
+        require(propertyIds.all(String::isNotBlank)) { "Notion property IDs must not be blank" }
         val response = execute {
             restClient.get()
-                .uri("/pages/{pageId}", pageId)
+                .uri { builder ->
+                    builder.path("/pages/{pageId}")
+                        .apply { propertyIds.forEach { queryParam("filter_properties[]", it) } }
+                        .build(pageId)
+                }
                 .retrieve()
                 .body(JsonNode::class.java)
         }
         return parsePage(response)
     }
 
+    fun fetchDatabase(databaseId: String): NotionDatabaseResponse {
+        require(databaseId.isNotBlank()) { "Notion database ID must not be blank" }
+        val response = execute {
+            restClient.get()
+                .uri("/databases/{databaseId}", databaseId)
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseResponse {
+            require(response.requiredText("object") == "database")
+            NotionDatabaseResponse(
+                id = response.requiredText("id"),
+                title = response.requiredArray("title").joinToString("") { title ->
+                    title.nullableText("plain_text") ?: throw IllegalArgumentException("Missing database title text")
+                },
+                url = response.nullableText("public_url") ?: response.nullableText("url"),
+                inTrash = response.requiredBoolean("in_trash"),
+            )
+        }
+    }
+
+    fun fetchDatabaseViews(databaseId: String, cursor: String? = null): NotionPaginationResponse<String> {
+        require(databaseId.isNotBlank()) { "Notion database ID must not be blank" }
+        val response = execute {
+            restClient.get()
+                .uri { builder ->
+                    builder.path("/views")
+                        .queryParam("database_id", databaseId)
+                        .queryParam(PAGE_SIZE_PARAMETER, PAGE_SIZE)
+                        .apply { cursor?.let { queryParam(START_CURSOR_PARAMETER, it) } }
+                        .build()
+                }
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseReferencePage(response, "view")
+    }
+
+    fun fetchDatabaseView(viewId: String): NotionDatabaseViewResponse {
+        require(viewId.isNotBlank()) { "Notion view ID must not be blank" }
+        val response = execute {
+            restClient.get()
+                .uri("/views/{viewId}", viewId)
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseResponse {
+            require(response.requiredText("object") == "view")
+            val parent = response.requiredObject("parent")
+            require(parent.requiredText("type") == "database_id")
+            val type = response.requiredText("type")
+            val configuration = if (type in SUPPORTED_VIEW_TYPES) response.nullableObject("configuration") else null
+            require(configuration == null || configuration.requiredText("type") == type)
+            NotionDatabaseViewResponse(
+                id = response.requiredText("id"),
+                databaseId = parent.requiredText("database_id"),
+                name = response.nullableText("name")?.takeIf(String::isNotBlank) ?: "데이터베이스 보기",
+                type = type,
+                dataSourceId = response.nullableText("data_source_id"),
+                columns = configuration?.let(::parseViewColumns),
+                configuration = configuration?.let { parseViewConfiguration(it, type) },
+            )
+        }
+    }
+
+    fun fetchDataSource(dataSourceId: String): NotionDataSourceResponse {
+        require(dataSourceId.isNotBlank()) { "Notion data source ID must not be blank" }
+        val response = execute {
+            restClient.get()
+                .uri("/data_sources/{dataSourceId}", dataSourceId)
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseResponse {
+            require(response.requiredText("object") == "data_source")
+            NotionDataSourceResponse(
+                id = response.requiredText("id"),
+                properties = response.requiredObject("properties").properties().map { (_, property) ->
+                    NotionDatabaseProperty(
+                        id = property.requiredText("id"),
+                        name = property.requiredText("name"),
+                        type = property.requiredText("type"),
+                    )
+                },
+            )
+        }
+    }
+
+    fun createViewQuery(viewId: String): NotionViewQueryResponse {
+        require(viewId.isNotBlank()) { "Notion view ID must not be blank" }
+        val response = execute {
+            restClient.post()
+                .uri("/views/{viewId}/queries", viewId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(mapOf(PAGE_SIZE_PARAMETER to PAGE_SIZE))
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseResponse {
+            require(response.requiredText("object") == "view_query")
+            NotionViewQueryResponse(
+                queryId = response.requiredText("id"),
+                viewId = response.requiredText("view_id"),
+                page = parsePagination(response) { parseReference(it, "page") },
+            )
+        }
+    }
+
+    fun fetchViewQueryResults(viewId: String, queryId: String, cursor: String): NotionPaginationResponse<String> {
+        require(viewId.isNotBlank()) { "Notion view ID must not be blank" }
+        require(queryId.isNotBlank()) { "Notion view query ID must not be blank" }
+        require(cursor.isNotBlank()) { "Notion view query cursor must not be blank" }
+        val response = execute {
+            restClient.get()
+                .uri { builder ->
+                    builder.path("/views/{viewId}/queries/{queryId}")
+                        .queryParam(PAGE_SIZE_PARAMETER, PAGE_SIZE)
+                        .queryParam(START_CURSOR_PARAMETER, cursor)
+                        .build(viewId, queryId)
+                }
+                .retrieve()
+                .body(JsonNode::class.java)
+        }
+        return parseReferencePage(response, "page")
+    }
+
     fun fetchDirectBlockChildren(blockId: String): List<NotionBlockEnvelope> {
         require(blockId.isNotBlank()) { "Notion block ID must not be blank" }
         val startedAt = System.nanoTime()
-        return collectPages(startedAt) { cursor ->
-            execute {
-                restClient.get()
-                    .uri { builder ->
-                        builder.path("/blocks/{blockId}/children")
-                            .queryParam(PAGE_SIZE_PARAMETER, PAGE_SIZE)
-                            .apply { cursor?.let { queryParam(START_CURSOR_PARAMETER, it) } }
-                            .build(blockId)
-                    }
-                    .retrieve()
-                    .body(JsonNode::class.java)
-            }.let(::parseBlockPage)
-        }
+        return collectPages(startedAt) { cursor -> fetchBlockChildrenPage(blockId, cursor) }
+    }
+
+    fun fetchBlockChildrenPage(blockId: String, cursor: String? = null): NotionPaginationResponse<NotionBlockEnvelope> {
+        require(blockId.isNotBlank()) { "Notion block ID must not be blank" }
+        require(cursor == null || cursor.isNotBlank()) { "Notion block cursor must not be blank" }
+        return execute {
+            restClient.get()
+                .uri { builder ->
+                    builder.path("/blocks/{blockId}/children")
+                        .queryParam(PAGE_SIZE_PARAMETER, PAGE_SIZE)
+                        .apply { cursor?.let { queryParam(START_CURSOR_PARAMETER, it) } }
+                        .build(blockId)
+                }
+                .retrieve()
+                .body(JsonNode::class.java)
+        }.let(::parseBlockPage)
     }
 
     fun fetchSettingsRows(dataSourceId: String): List<NotionSettingsRowResponse> {
@@ -129,6 +275,8 @@ internal class NotionApiClient(
             inTrash = node.requiredBoolean("in_trash"),
             lastEditedTime = node.requiredText("last_edited_time"),
             properties = node.requiredObject("properties"),
+            icon = node.nullableObject("icon"),
+            cover = node.nullableObject("cover"),
         )
     } catch (exception: IllegalArgumentException) {
         throw failureTranslator.invalidResponse()
@@ -137,7 +285,72 @@ internal class NotionApiClient(
     private fun parsePageParent(node: JsonNode): NotionPageParentResponse = NotionPageParentResponse(
         type = node.requiredText("type"),
         pageId = node.optionalText("page_id"),
+        dataSourceId = node.nullableText("data_source_id"),
     )
+
+    private fun parseViewColumns(configuration: JsonNode): List<NotionViewColumn>? {
+        val properties = configuration.get("properties")?.takeUnless(JsonNode::isNull) ?: return null
+        require(properties.isArray)
+        return properties.mapNotNull { property ->
+            val propertyId = property.requiredText("property_id")
+            val name = property.nullableText("property_name")
+            val visible = property.get("visible")
+            require(visible == null || visible.isBoolean)
+            val width = property.nullableNonnegativeInt("width")
+            val wrap = property.nullableBoolean("wrap")
+            if (visible?.asBoolean() == true) NotionViewColumn(propertyId, name, width, wrap) else null
+        }
+    }
+
+    private fun parseViewConfiguration(configuration: JsonNode, type: String): NotionViewConfiguration = when (type) {
+        "table" -> NotionViewConfiguration.Table(
+            wrapCells = configuration.nullableBoolean("wrap_cells") ?: true,
+            frozenColumns = configuration.nullableNonnegativeInt("frozen_column_index") ?: 0,
+            showVerticalLines = configuration.nullableBoolean("show_vertical_lines") ?: true,
+        )
+
+        "list" -> NotionViewConfiguration.ListView
+
+        "gallery" -> NotionViewConfiguration.Gallery(
+            cover = configuration.nullableObject("cover")?.let(::parseGalleryCover),
+            size = when (configuration.nullableText("cover_size")) {
+                null, "medium" -> NotionGallerySize.MEDIUM
+                "small" -> NotionGallerySize.SMALL
+                "large" -> NotionGallerySize.LARGE
+                else -> throw IllegalArgumentException("Invalid gallery size")
+            },
+            aspect = when (configuration.nullableText("cover_aspect")) {
+                null, "cover" -> NotionGalleryAspect.COVER
+                "contain" -> NotionGalleryAspect.CONTAIN
+                else -> throw IllegalArgumentException("Invalid gallery aspect")
+            },
+            layout = when (configuration.nullableText("card_layout")) {
+                null, "list" -> NotionGalleryLayout.LIST
+                "compact" -> NotionGalleryLayout.COMPACT
+                else -> throw IllegalArgumentException("Invalid gallery layout")
+            },
+        )
+
+        else -> throw IllegalArgumentException("Unsupported view type")
+    }
+
+    private fun parseGalleryCover(cover: JsonNode): NotionGalleryCover = when (cover.requiredText("type")) {
+        "page_cover" -> NotionGalleryCover.PageCover
+        "page_content" -> NotionGalleryCover.PageContent
+        "property" -> NotionGalleryCover.Property(cover.requiredText("property_id"))
+        else -> throw IllegalArgumentException("Invalid gallery cover")
+    }
+
+    private fun parseReferencePage(node: JsonNode, type: String): NotionPaginationResponse<String> = parseResponse {
+        require(node.requiredText("object") == "list" && node.requiredText("type") == type)
+        node.requiredObject(type)
+        parsePagination(node) { parseReference(it, type) }
+    }
+
+    private fun parseReference(node: JsonNode, type: String): String {
+        require(node.requiredText("object") == type)
+        return node.requiredText("id")
+    }
 
     private fun parseBlockPage(node: JsonNode): NotionPaginationResponse<NotionBlockEnvelope> = parsePagination(node) { block ->
         NotionBlockEnvelope(
@@ -160,12 +373,20 @@ internal class NotionApiClient(
         node: JsonNode,
         parseResult: (JsonNode) -> T,
     ): NotionPaginationResponse<T> = try {
+        val status = node.get("request_status")
+        require(status == null || (status.isObject && status.requiredText("type") == "complete"))
         val results = node.requiredArray("results").toList().map(parseResult)
         NotionPaginationResponse(
             results = results,
             hasMore = node.requiredBoolean("has_more"),
             nextCursor = node.optionalCursor(),
         )
+    } catch (exception: IllegalArgumentException) {
+        throw failureTranslator.invalidResponse()
+    }
+
+    private fun <T> parseResponse(parse: () -> T): T = try {
+        parse()
     } catch (exception: IllegalArgumentException) {
         throw failureTranslator.invalidResponse()
     }
@@ -189,6 +410,12 @@ internal class NotionApiClient(
         ?.stringValue()
         ?.takeIf(String::isNotBlank)
 
+    private fun JsonNode.nullableText(field: String): String? {
+        val value = get(field)?.takeUnless(JsonNode::isNull) ?: return null
+        require(value.isString)
+        return value.stringValue()
+    }
+
     private fun JsonNode.optionalCursor(): String? {
         val cursor = get("next_cursor") ?: return null
         if (cursor.isNull) {
@@ -202,6 +429,24 @@ internal class NotionApiClient(
         ?.takeIf(JsonNode::isBoolean)
         ?.asBoolean()
         ?: throw IllegalArgumentException("Missing required field")
+
+    private fun JsonNode.nullableBoolean(field: String): Boolean? {
+        val value = get(field)?.takeUnless(JsonNode::isNull) ?: return null
+        require(value.isBoolean)
+        return value.asBoolean()
+    }
+
+    private fun JsonNode.nullableNonnegativeInt(field: String): Int? {
+        val value = get(field)?.takeUnless(JsonNode::isNull) ?: return null
+        require(value.isInt && value.intValue() >= 0)
+        return value.intValue()
+    }
+
+    private fun JsonNode.nullableObject(field: String): JsonNode? {
+        val value = get(field)?.takeUnless(JsonNode::isNull) ?: return null
+        require(value.isObject)
+        return value
+    }
 
     private fun JsonNode.requiredObject(field: String): JsonNode = get(field)
         ?.takeIf(JsonNode::isObject)
@@ -238,5 +483,6 @@ internal class NotionApiClient(
         const val OFFICIAL_HOST = "api.notion.com"
         const val HTTPS_PORT = 443
         val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1")
+        val SUPPORTED_VIEW_TYPES = setOf("table", "list", "gallery")
     }
 }

@@ -1,6 +1,7 @@
 package xyz.robinjoon.notionblog.adapter.output.notion
 
 import tools.jackson.databind.JsonNode
+import tools.jackson.databind.json.JsonMapper
 import xyz.robinjoon.notionblog.adapter.output.notion.client.NotionApiClient
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionBlockEnvelope
 import xyz.robinjoon.notionblog.adapter.output.notion.mapping.NotionBlockMapper
@@ -16,10 +17,21 @@ import xyz.robinjoon.notionblog.application.port.output.source.SourceMappingExce
 import xyz.robinjoon.notionblog.domain.post.block.BlockId
 import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
+import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
+import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.ReferenceBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ReusableBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.content.UnsupportedBlockContent
+import xyz.robinjoon.notionblog.domain.post.block.inline.InlineContent
+import xyz.robinjoon.notionblog.domain.post.block.inline.LinkTarget
+import xyz.robinjoon.notionblog.domain.post.block.media.MediaSource
 import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
 import xyz.robinjoon.notionblog.domain.source.SourceId
+import xyz.robinjoon.notionblog.domain.source.SourceRevision
+import java.security.MessageDigest
 import java.time.Duration
+import java.util.HexFormat
 
 internal class NotionPostSource(
     private val sourceId: SourceId,
@@ -31,6 +43,8 @@ internal class NotionPostSource(
     private val collectionTimeout: Duration,
     private val nanoTime: () -> Long = System::nanoTime,
 ) : PostSource {
+    private val databaseReader = NotionInlineDatabaseReader(client, blockMapper)
+
     init {
         require(maxDepth > 0) { "Notion maximum block depth must be positive" }
         require(maxBlockCount > 0) { "Notion maximum block count must be positive" }
@@ -54,7 +68,7 @@ internal class NotionPostSource(
                 sourceDocument = metadata.sourceDocument,
                 title = metadata.title,
                 publicationStatus = metadata.publicationStatus,
-                sourceRevision = metadata.sourceRevision,
+                sourceRevision = databaseRevision(metadata.sourceRevision, state.inlineDatabases),
                 content = BlockTree(roots),
                 containedChildren = state.containedChildren,
             )
@@ -92,14 +106,32 @@ internal class NotionPostSource(
         checkDeadline(startedAt)
         val blocks = client.fetchDirectBlockChildren(parentBlockId)
         checkDeadline(startedAt)
+        if (blocks.isNotEmpty()) {
+            state.parentsWithReturnedChildren += parentIdentity
+        }
         val activeBlocks = blocks.filterNot(NotionBlockEnvelope::inTrash)
         activeBlocks.mapNotNullTo(state.transcriptBlockIds) { block -> meetingNotesSections(block).transcriptBlockId }
         val collectedChildren = activeBlocks.asSequence()
             .filterNot { block -> blockIdentity(block.id) in state.transcriptBlockIds }
             .filterNot { block -> skipPreviouslyVisitedBlocks && blockIdentity(block.id) in state.visitedBlockIds }
-            .map { block ->
+            .mapNotNull { block ->
                 countAndVisit(block, state)
                 reserveMaterializedBlock(state)
+                if (block.type == CHILD_DATABASE_TYPE) {
+                    val database = databaseReader.read(
+                        blockMapper.map(block, sourceDocument = sourceDocument),
+                        checkDeadline = { checkDeadline(startedAt) },
+                        reserve = {
+                            checkDeadline(startedAt)
+                            reserveMaterializedBlock(state)
+                        },
+                    )
+                    if (database != null) {
+                        validateDepth(database.children, depth + 1)
+                        state.inlineDatabases += database
+                    }
+                    return@mapNotNull database
+                }
                 val ordinaryChildren = if (block.hasChildren && block.type != CHILD_PAGE_TYPE) {
                     collectChildren(
                         block.id,
@@ -130,7 +162,7 @@ internal class NotionPostSource(
                     }
                     .toList()
                 val directChildren = ordinaryChildren + sectionChildren
-                val children = if (block.hasChildren && directChildren.isEmpty()) {
+                val children = if (block.hasChildren && directChildren.isEmpty() && blockIdentity(block.id) !in state.parentsWithReturnedChildren) {
                     synchronizedOriginBlockId(block, sourceDocument)
                         ?.let { originBlockId ->
                             copyForSynchronizedReference(
@@ -194,6 +226,20 @@ internal class NotionPostSource(
     ): BlockNode {
         reserveMaterializedBlock(state)
         checkDeadline(startedAt)
+        if (content is DataViewContent) {
+            content.data.columns.forEach {
+                checkDeadline(startedAt)
+                reserveMaterializedBlock(state)
+            }
+            content.data.rows.forEach { row ->
+                checkDeadline(startedAt)
+                reserveMaterializedBlock(state)
+                row.cells.forEach {
+                    checkDeadline(startedAt)
+                    reserveMaterializedBlock(state)
+                }
+            }
+        }
         return copy(
             id = BlockId("synced:$referenceIdentity:${id.value}"),
             children = children.map { child ->
@@ -306,13 +352,104 @@ internal class NotionPostSource(
         }
     }
 
+    private fun databaseRevision(pageRevision: SourceRevision, databases: List<BlockNode>): SourceRevision {
+        if (databases.isEmpty()) return pageRevision
+        // Row edits and publication changes need not update the parent page's revision.
+        val encoded = DATABASE_FINGERPRINT_MAPPER.writeValueAsBytes(databases.map(::databaseFingerprint))
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(encoded)
+        return SourceRevision("${pageRevision.value}:inline-db-v2:${HexFormat.of().formatHex(fingerprint)}")
+    }
+
+    private fun databaseFingerprint(block: BlockNode): List<Any?> = listOf(
+        block.id.value,
+        block.style.let { listOf(it.foreground?.name, it.background?.name, it.alignment?.name, it.width?.ratio, it.variant?.value) },
+        when (val content = block.content) {
+            is ReferenceBlockContent.DatabaseLink -> listOf(
+                "database",
+                content.reference.sourceId.value,
+                content.reference.externalId,
+                content.originalUrl?.toString(),
+                content.title,
+            )
+
+            LayoutBlockContent.TabContainer -> listOf("tabs")
+
+            is LayoutBlockContent.TabItem -> listOf("tab", content.title.map(::inlineFingerprint), iconFingerprint(content.icon))
+
+            is DataViewContent -> dataViewFingerprint(content)
+
+            is UnsupportedBlockContent -> listOf("unsupported", content.blockType)
+
+            else -> throw SourceMappingException("Notion inline database contains an unexpected block")
+        },
+        block.children.map(::databaseFingerprint),
+    )
+
+    private fun dataViewFingerprint(content: DataViewContent): List<Any?> = listOf(
+        when (content) {
+            is DataViewContent.Table -> content.options.let {
+                listOf("table", it.wrapCells, it.frozenColumns, it.showVerticalLines)
+            }
+
+            is DataViewContent.ListView -> listOf("list")
+
+            is DataViewContent.Gallery -> content.options.let {
+                listOf("gallery", it.size.name, it.aspect.name, it.layout.name)
+            }
+        },
+        content.data.title,
+        content.data.titleColumnIndex,
+        content.data.columns.map { listOf(it.name, it.widthPixels, it.wrap) },
+        content.data.rows.map { row ->
+            listOf(
+                row.cells.map { cell -> cell.map(::inlineFingerprint) },
+                linkFingerprint(row.link),
+                iconFingerprint(row.icon),
+                mediaFingerprint(row.cover),
+            )
+        },
+    )
+
+    private fun inlineFingerprint(inline: InlineContent): List<Any?> = listOf(
+        when (inline) {
+            is InlineContent.Text -> listOf("text", inline.text, linkFingerprint(inline.link))
+            is InlineContent.Equation -> listOf("equation", inline.expression)
+            is InlineContent.Mention -> listOf("mention", inline.label, inline.kind.name, linkFingerprint(inline.target))
+        },
+        inline.annotations.let {
+            listOf(it.bold, it.italic, it.strikethrough, it.underline, it.code, it.foreground?.name, it.background?.name)
+        },
+    )
+
+    private fun linkFingerprint(link: LinkTarget?): List<String?>? = when (link) {
+        null -> null
+        is LinkTarget.ExternalUrl -> listOf("external", link.url.toString())
+        is LinkTarget.SourceDocument -> listOf("document", link.reference.sourceId.value, link.reference.externalId, link.originalUrl?.toString())
+    }
+
+    private fun iconFingerprint(icon: BlockIcon?): List<Any?>? = when (icon) {
+        null -> null
+        is BlockIcon.Emoji -> listOf("emoji", icon.value)
+        is BlockIcon.Native -> listOf("native", icon.name, icon.color?.name)
+        is BlockIcon.CustomEmoji -> listOf("custom", icon.externalId, icon.name, mediaFingerprint(icon.source))
+        is BlockIcon.Media -> listOf("media", mediaFingerprint(icon.source))
+    }
+
+    private fun mediaFingerprint(source: MediaSource?): List<String?>? = when (source) {
+        null -> null
+        is MediaSource.External -> listOf("external", source.url.toString())
+        is MediaSource.SourceHosted -> listOf("hosted", source.url.toString(), source.expiresAt?.toString())
+    }
+
     private class TraversalState(
         val visitedPageIds: MutableSet<String>,
         val visitedBlockIds: MutableSet<String> = mutableSetOf(),
         val collectedChildrenParentIds: MutableSet<String> = mutableSetOf(),
+        val parentsWithReturnedChildren: MutableSet<String> = mutableSetOf(),
         val childrenByParentId: MutableMap<String, List<BlockNode>> = mutableMapOf(),
         val transcriptBlockIds: MutableSet<String> = mutableSetOf(),
         val containedChildren: MutableList<SourceDocumentRef> = mutableListOf(),
+        val inlineDatabases: MutableList<BlockNode> = mutableListOf(),
         var blockCount: Int = 0,
         var materializedBlockCount: Int = 0,
     )
@@ -327,7 +464,9 @@ internal class NotionPostSource(
     }
 
     private companion object {
+        val DATABASE_FINGERPRINT_MAPPER = JsonMapper.builder().build()
         const val CHILD_PAGE_TYPE = "child_page"
+        const val CHILD_DATABASE_TYPE = "child_database"
         const val MEETING_NOTES_TYPE = "meeting_notes"
         const val PAGE_PARENT_TYPE = "page_id"
         const val PARAGRAPH_TYPE = "paragraph"

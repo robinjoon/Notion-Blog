@@ -75,6 +75,25 @@ internal class NotionBlockMapper(
         )
     }
 
+    fun mapRichText(values: JsonNode): List<InlineContent> {
+        if (!values.isArray) throw NotionBlockMappingException("rich text must be an array")
+        return values.toList().map(::inline)
+    }
+
+    fun mapIcon(node: JsonNode?): BlockIcon? = icon(node)
+
+    fun mapMediaSource(payload: JsonNode): MediaSource = when (payload.requiredText("type")) {
+        "external" -> MediaSource.External(payload.requiredObject("external").safeUri("url"))
+
+        "file" -> {
+            val file = payload.requiredObject("file")
+            val expiresAt = file.optionalText("expiry_time")?.let(::parseInstant)
+            MediaSource.SourceHosted(file.safeUri("url"), expiresAt)
+        }
+
+        else -> throw NotionBlockMappingException("media source is unsupported")
+    }
+
     private fun mapContent(
         type: String,
         payload: JsonNode,
@@ -238,25 +257,12 @@ internal class NotionBlockMapper(
         )
     }
 
-    private fun media(payload: JsonNode, mediaType: MediaType): MediaBlockContent.Media {
-        val source = when (payload.requiredText("type")) {
-            "external" -> MediaSource.External(payload.requiredObject("external").safeUri("url"))
-
-            "file" -> {
-                val file = payload.requiredObject("file")
-                val expiresAt = file.optionalText("expiry_time")?.let(::parseInstant)
-                MediaSource.SourceHosted(file.safeUri("url"), expiresAt)
-            }
-
-            else -> throw NotionBlockMappingException("$mediaType media source is unsupported")
-        }
-        return MediaBlockContent.Media(
-            mediaType = mediaType,
-            source = source,
-            fileName = payload.optionalText("name"),
-            caption = richTextOrEmpty(payload, "caption"),
-        )
-    }
+    private fun media(payload: JsonNode, mediaType: MediaType): MediaBlockContent.Media = MediaBlockContent.Media(
+        mediaType = mediaType,
+        source = mapMediaSource(payload),
+        fileName = payload.optionalText("name"),
+        caption = richTextOrEmpty(payload, "caption"),
+    )
 
     private fun meetingNotes(payload: JsonNode): SpecialBlockContent.MeetingNotes {
         val titleRichText = richTextOrEmpty(payload, "title")
@@ -331,7 +337,8 @@ internal class NotionBlockMapper(
             "text" -> {
                 val text = node.requiredObject("text")
                 InlineContent.Text(
-                    text = text.requiredText("content"),
+                    text = text.get("content")?.takeIf(JsonNode::isString)?.stringValue()
+                        ?: throw NotionBlockMappingException("text content must be a string"),
                     annotations = annotations,
                     link = text.optionalObject("link")?.safeUri("url")?.let(LinkTarget::ExternalUrl),
                 )

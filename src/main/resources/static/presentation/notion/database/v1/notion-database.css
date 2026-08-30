@@ -1,0 +1,62 @@
+/* Read-only inline database tables, using the active presentation tokens. */
+.notion-database {
+  max-inline-size: 100%;
+  padding: 1rem;
+}
+
+.notion-database:hover {
+  background: var(--notion-page);
+}
+
+.notion-database > a,
+.notion-database > span:not(.notion-sr-only) {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.notion-database > .notion-children > .notion-tabs {
+  margin-block-end: 0;
+}
+
+.notion-data-table-wrapper {
+  max-inline-size: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  margin-block: var(--notion-block-space);
+}
+
+.notion-data-table-wrapper:focus-visible {
+  outline: 2px solid var(--notion-focus);
+  outline-offset: 2px;
+}
+
+.notion-data-table caption {
+  padding: 0.65rem 0.7rem;
+  border-block-end: 1px solid var(--notion-border);
+  background: var(--notion-page);
+  font-weight: 600;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.notion-data-table-cell {
+  min-inline-size: 9rem;
+  max-inline-size: 24rem;
+  overflow-wrap: anywhere;
+}
+
+.notion-data-table .notion-data-table-empty {
+  padding-block: 1.25rem;
+  color: var(--notion-text-muted);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .notion-database {
+    padding: 0.65rem;
+  }
+
+  .notion-database .notion-tabs [role=tabpanel] {
+    padding: 0.5rem;
+  }
+}

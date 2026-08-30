@@ -6,6 +6,9 @@ import org.thymeleaf.context.Context
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templatemode.TemplateMode
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataGalleryView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataListView
+import xyz.robinjoon.notionblog.adapter.input.web.view.DataTableView
 import xyz.robinjoon.notionblog.adapter.input.web.view.ExternalLinkView
 import xyz.robinjoon.notionblog.adapter.input.web.view.InternalLinkView
 import xyz.robinjoon.notionblog.adapter.input.web.view.ListView
@@ -23,6 +26,15 @@ import xyz.robinjoon.notionblog.domain.post.block.BlockNode
 import xyz.robinjoon.notionblog.domain.post.block.BlockTree
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.BlockIcon
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardLayout
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCardSize
+import xyz.robinjoon.notionblog.domain.post.block.content.DataColumn
+import xyz.robinjoon.notionblog.domain.post.block.content.DataCoverAspect
+import xyz.robinjoon.notionblog.domain.post.block.content.DataGalleryOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataRow
+import xyz.robinjoon.notionblog.domain.post.block.content.DataSet
+import xyz.robinjoon.notionblog.domain.post.block.content.DataTableOptions
+import xyz.robinjoon.notionblog.domain.post.block.content.DataViewContent
 import xyz.robinjoon.notionblog.domain.post.block.content.HeadingLevel
 import xyz.robinjoon.notionblog.domain.post.block.content.LayoutBlockContent
 import xyz.robinjoon.notionblog.domain.post.block.content.ListBlockContent
@@ -57,9 +69,13 @@ import xyz.robinjoon.notionblog.domain.site.SiteMetadata
 import xyz.robinjoon.notionblog.domain.source.SourceDocumentRef
 import xyz.robinjoon.notionblog.domain.source.SourceId
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Base64
 import java.util.UUID
 
 class PostPageViewAssemblerTest {
@@ -324,6 +340,272 @@ class PostPageViewAssemblerTest {
     }
 
     @Test
+    fun `renders database table captions columns and rich cells with safe resolved links`() {
+        val reference = LinkTarget.SourceDocument(SourceDocumentRef(SourceId("notion"), "public-row"), URI("https://notion.so/public-row"))
+        val page = page(
+            nodes = listOf(
+                node(
+                    "database-table",
+                    dataTable(
+                        title = "Roadmap <script>unsafe</script>",
+                        columns = listOf("Name <img src=x onerror=alert(1)>", "Status & notes"),
+                        rows = listOf(
+                            DataRow(
+                                listOf(
+                                    listOf(InlineContent.Text("Published item", TextAnnotations(bold = true), reference)),
+                                    listOf(
+                                        InlineContent.Text("Ready", TextAnnotations(background = ColorToken.GREEN)),
+                                        InlineContent.Text("Documentation", link = LinkTarget.ExternalUrl(URI("https://example.com/docs"))),
+                                    ),
+                                ),
+                            ),
+                            DataRow(
+                                listOf(
+                                    listOf(InlineContent.Text("<script>alert(1)</script>", link = LinkTarget.ExternalUrl(URI("javascript:alert(1)")))),
+                                    emptyList(),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            links = mapOf(reference to LinkResolution.Internal(PostId(UUID.fromString("00000000-0000-0000-0000-000000000123")))),
+        )
+
+        val view = assembler.assemble(page).post.blocks.single() as DataTableView
+        val html = render(page)
+        val table = html.substringAfter("<table class=\"notion-table notion-data-table\"").substringBefore("</table>")
+
+        assertThat(view.title).isEqualTo("Roadmap <script>unsafe</script>")
+        assertThat(view.columns.map { it.name }).containsExactly("Name <img src=x onerror=alert(1)>", "Status & notes")
+        assertThat(view.rows).hasSize(2)
+        assertThat((view.rows[0].cells[0].single() as TextInlineView).annotations.bold).isTrue()
+        assertThat((view.rows[1].cells[0].single() as TextInlineView).link).isNull()
+        assertThat(html).contains("notion-data-table-wrapper", "role=\"region\"", "tabindex=\"0\"", "aria-labelledby=\"database-table-caption\"")
+        assertThat(table).contains("<caption id=\"database-table-caption\">Roadmap &lt;script&gt;unsafe&lt;/script&gt;</caption>", "<thead>", "<tbody>")
+        assertThat(Regex("scope=\"col\"").findAll(table).count()).isEqualTo(2)
+        assertThat(Regex("<tr>").findAll(table.substringAfter("<tbody>")).count()).isEqualTo(2)
+        assertThat(table).contains(
+            "Name &lt;img src=x onerror=alert(1)&gt;",
+            "Status &amp; notes",
+            "href=\"/posts/00000000-0000-0000-0000-000000000123\"",
+            "notion-background-green",
+            "href=\"https://example.com/docs\"",
+            "rel=\"noopener noreferrer\"",
+            "&lt;script&gt;alert(1)&lt;/script&gt;",
+        )
+        assertThat(table).doesNotContain("<script", "<img", "href=\"javascript:", "style=", "data-source", "property-id")
+    }
+
+    @Test
+    fun `renders an accessible empty database result without inventing rows`() {
+        val html = render(page(listOf(node("empty-database", dataTable("Published tasks", listOf("Task", "Owner"), emptyList())))))
+        val table = html.substringAfter("<table class=\"notion-table notion-data-table\"").substringBefore("</table>")
+
+        assertThat(table).contains("<caption id=\"empty-database-caption\">Published tasks</caption>", ">Task</div>", ">Owner</div>")
+        assertThat(table).contains("colspan=\"2\"", "notion-data-table-empty", "No published rows in this view.")
+        assertThat(table.substringAfter("<tbody>")).doesNotContain("notion-data-table-cell")
+    }
+
+    @Test
+    fun `keeps database titles and view tabs around tables without unavailable announcements`() {
+        val reference = SourceDocumentRef(SourceId("notion"), "database")
+        val tabs = listOf("Active", "Archive").mapIndexed { index, title ->
+            BlockNode(
+                BlockId("database-view-$index"),
+                LayoutBlockContent.TabItem(listOf(InlineContent.Text(title)), null),
+                children = listOf(node("database-table-$index", dataTable(title, listOf("Task"), emptyList()))),
+            )
+        }
+        val database = BlockNode(
+            BlockId("database"),
+            ReferenceBlockContent.DatabaseLink(reference, null, "Team tasks"),
+            children = listOf(BlockNode(BlockId("database-views"), LayoutBlockContent.TabContainer, children = tabs)),
+        )
+
+        val html = render(page(listOf(database)))
+        val markup = html.substringAfter("id=\"database\"").substringBefore("</aside>")
+
+        assertThat(html).contains("notion-database")
+        assertThat(markup).contains("Team tasks", "role=\"tablist\"", "aria-selected=\"true\"", "aria-selected=\"false\"", "Active", "Archive")
+        assertThat(Regex("class=\"notion-table notion-data-table\"").findAll(markup).count()).isEqualTo(2)
+        assertThat(markup).doesNotContain(" unavailable")
+    }
+
+    @Test
+    fun `renders table width wrapping vertical line and frozen column options without source CSS`() {
+        val data = DataSet(
+            "Readable table",
+            listOf(DataColumn("Title", 201, false), DataColumn("Notes", 900, true), DataColumn("Default", 0), DataColumn("Small", 1)),
+            listOf(DataRow(List(4) { listOf(InlineContent.Text("A long value")) }, link = LinkTarget.ExternalUrl(URI("https://example.com/row")), icon = BlockIcon.Emoji("📚"))),
+            titleColumnIndex = 0,
+        )
+        val table = DataViewContent.Table(data, DataTableOptions(wrapCells = false, frozenColumns = 2, showVerticalLines = false))
+        val view = assembler.assemble(page(listOf(node("configured-table", table)))).post.blocks.single() as DataTableView
+        val html = render(page(listOf(node("configured-table", table))))
+
+        assertThat(view.columns.map { it.widthClass.cssClass }).containsExactly("notion-data-width-200", "notion-data-width-640", "notion-data-width-200", "notion-data-width-80")
+        assertThat(view.columns.map { it.wrap }).containsExactly(false, true, false, false)
+        assertThat(view.columns.map { it.frozen }).containsExactly(true, true, false, false)
+        assertThat(html).contains("data-frozen-columns=\"2\"", "notion-data-table-no-vertical-lines", "notion-data-nowrap", "notion-data-wrap", "notion-data-width-640", "aria-label=\"Title\"")
+        assertThat(Regex("href=\"https://example.com/row\"").findAll(html).count()).isEqualTo(1)
+        assertThat(Regex("📚").findAll(html).count()).isEqualTo(1)
+        assertThat(html).doesNotContain("style=", "width=\"900", "<script>")
+    }
+
+    @Test
+    fun `renders database lists as named entries with properties and safe non nested title links`() {
+        val rowLink = LinkTarget.SourceDocument(SourceDocumentRef(SourceId("notion"), "row"), URI("https://example.com/row"))
+        val data = DataSet(
+            "Reading list <script>",
+            listOf(DataColumn("Status"), DataColumn("Name"), DataColumn("Reference")),
+            listOf(
+                DataRow(
+                    listOf(
+                        listOf(InlineContent.Text("Published")),
+                        listOf(InlineContent.Text("Article <img>", TextAnnotations(bold = true), LinkTarget.ExternalUrl(URI("https://example.com/old-title-link")))),
+                        listOf(InlineContent.Text("Documentation", link = LinkTarget.ExternalUrl(URI("https://example.com/docs")))),
+                    ),
+                    link = rowLink,
+                    icon = BlockIcon.Emoji("📚"),
+                ),
+            ),
+            titleColumnIndex = 1,
+        )
+        val input = page(listOf(node("reading-list", DataViewContent.ListView(data))), mapOf(rowLink to LinkResolution.Internal(PostId(UUID.fromString("00000000-0000-0000-0000-000000000123")))))
+        val view = assembler.assemble(input).post.blocks.single() as DataListView
+        val html = render(input)
+
+        assertThat(view.rows.single().properties.map { it.name }).containsExactly("Status", "Reference")
+        assertThat(html).contains("notion-data-list", "<ul", "<li", "<dl", "<dt>Status</dt>", "Article &lt;img&gt;", "Reading list &lt;script&gt;", "📚")
+        assertThat(html).contains("href=\"/posts/00000000-0000-0000-0000-000000000123\"", "href=\"https://example.com/docs\"")
+        assertThat(html).doesNotContain("notion-data-table", "<table", "<dt>Name</dt>", "old-title-link", "<script", "<img>")
+        assertThat(Regex("<a\\b[^>]*>(?:(?!</a>).)*<a\\b", RegexOption.DOT_MATCHES_ALL).containsMatchIn(html)).isFalse()
+    }
+
+    @Test
+    fun `renders gallery card options and only safe unexpired covers`() {
+        val data = DataSet(
+            "Gallery",
+            listOf(DataColumn("Name"), DataColumn("Description")),
+            listOf(
+                DataRow(listOf(listOf(InlineContent.Text("Visible cover")), listOf(InlineContent.Text("A description"))), cover = MediaSource.External(URI("https://example.com/cover.png"))),
+                DataRow(listOf(listOf(InlineContent.Text("Expired cover")), emptyList()), cover = MediaSource.SourceHosted(URI("https://example.com/expired.png"), clock.instant())),
+                DataRow(listOf(listOf(InlineContent.Text("Unsafe cover")), emptyList()), cover = MediaSource.External(URI("javascript:alert(1)"))),
+                DataRow(listOf(emptyList(), emptyList()), link = LinkTarget.ExternalUrl(URI("javascript:alert(1)"))),
+            ),
+            titleColumnIndex = 0,
+        )
+        val gallery = DataViewContent.Gallery(data, DataGalleryOptions(DataCardSize.LARGE, DataCoverAspect.CONTAIN, DataCardLayout.COMPACT))
+        val input = page(listOf(node("gallery", gallery)))
+        val view = assembler.assemble(input).post.blocks.single() as DataGalleryView
+        val html = render(input)
+
+        assertThat(view.rows.map { it.coverUrl }).containsExactly("https://example.com/cover.png", null, null, null)
+        assertThat(html).contains("notion-data-gallery", "notion-data-gallery-large", "notion-data-gallery-contain", "notion-data-gallery-compact", "notion-data-card")
+        assertThat(html).contains("src=\"https://example.com/cover.png\"", "alt=\"Visible cover\"", "loading=\"lazy\"", "Untitled", "Description")
+        assertThat(html).doesNotContain("expired.png", "javascript:", "<table", "<dt>Name</dt>", "style=")
+        assertThat(Regex("<img\\b").findAll(html).count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `uses neutral row titles when the visible data has no title column and shows empty list and gallery states`() {
+        val data = DataSet("Untitled rows", listOf(DataColumn("Status")), listOf(DataRow(listOf(listOf(InlineContent.Text("Ready"))), link = LinkTarget.ExternalUrl(URI("https://example.com/row")))))
+        val empty = DataSet("Empty", listOf(DataColumn("Status")), emptyList())
+        val input = page(
+            listOf(
+                node("no-title", DataViewContent.ListView(data)),
+                node("empty-list", DataViewContent.ListView(empty)),
+                node("empty-gallery", DataViewContent.Gallery(empty)),
+            ),
+        )
+        val list = assembler.assemble(input).post.blocks.first() as DataListView
+        val html = render(input)
+
+        assertThat(list.rows.single().titleText).isEqualTo("Untitled")
+        assertThat(list.rows.single().properties.single().name).isEqualTo("Status")
+        assertThat(html).contains("Untitled", "href=\"https://example.com/row\"", "<dt>Status</dt>")
+        assertThat(Regex("No published rows in this view\\.").findAll(html).count()).isEqualTo(2)
+    }
+
+    @Test
+    fun `renders three multilingual database layouts with versioned assets for browser verification`() {
+        val rows = (1..3).map { index ->
+            DataRow(
+                listOf(
+                    listOf(InlineContent.Text("인라인 데이터베이스 구현 $index", TextAnnotations(bold = true))),
+                    listOf(InlineContent.Text(if (index % 2 == 0) "진행 중" else "완료", TextAnnotations(background = ColorToken.GREEN))),
+                    listOf(InlineContent.Text("Robin / 로빈")),
+                    listOf(InlineContent.Text("2026-09-01")),
+                    listOf(InlineContent.Text("Read documentation", link = LinkTarget.ExternalUrl(URI("https://example.com/docs")))),
+                    listOf(InlineContent.Text("길고 다양한 언어의 셀도 읽을 수 있어야 합니다. 日本語の説明と English notes. " + "very-long-unbroken-value".repeat(3))),
+                ),
+                link = LinkTarget.ExternalUrl(URI("https://example.com/tasks/$index")),
+                icon = BlockIcon.Emoji(if (index == 1) "📚" else "📝"),
+                cover = if (index == 2) null else MediaSource.External(URI("http://localhost:8081/preview-cover.svg")),
+            )
+        }
+        val columns = listOf(DataColumn("이름 / Name", 240), DataColumn("상태 / Status", 120, false), DataColumn("담당 / Owner", 160), DataColumn("마감 / Due", 160), DataColumn("문서 링크", 200), DataColumn("설명 / Notes", 320))
+        val data = DataSet("공개 문서 · Published notes", columns, rows, titleColumnIndex = 0)
+        val layouts = listOf(
+            "표 · Table" to DataViewContent.Table(data, DataTableOptions(frozenColumns = 1)),
+            "리스트 · List" to DataViewContent.ListView(data),
+            "갤러리 · Gallery" to DataViewContent.Gallery(data),
+        )
+        val tabs = layouts.mapIndexed { index, (title, layout) ->
+            BlockNode(
+                BlockId("preview-view-$index"),
+                LayoutBlockContent.TabItem(listOf(InlineContent.Text(title)), null),
+                children = listOf(node("preview-layout-$index", layout)),
+            )
+        }
+        val reference = SourceDocumentRef(SourceId("notion"), "preview-database")
+        val base = page(
+            listOf(
+                node("preview-introduction", TextBlockContent.Paragraph(listOf(InlineContent.Text("동일한 공개 데이터를 표, 리스트, 갤러리로 표시합니다. 탭을 선택해 각 레이아웃을 확인하세요.")))),
+                BlockNode(
+                    BlockId("preview-database"),
+                    ReferenceBlockContent.DatabaseLink(reference, URI("https://example.com/database"), "제품 개발 · Product roadmap"),
+                    children = listOf(BlockNode(BlockId("preview-views"), LayoutBlockContent.TabContainer, children = tabs)),
+                ),
+                node("preview-empty", dataTable("공개 항목 없음 · No published items", listOf("이름", "상태"), emptyList())),
+                node("preview-empty-list", DataViewContent.ListView(DataSet("빈 리스트", listOf(DataColumn("이름")), emptyList()))),
+                node("preview-empty-gallery", DataViewContent.Gallery(DataSet("빈 갤러리", listOf(DataColumn("이름")), emptyList()))),
+            ),
+        )
+        val styles = listOf(
+            "notion" to "/presentation/notion/v1/notion.css",
+            "notion-enhancements" to "/presentation/notion/enhancements/v1/notion-enhancements.css",
+            "notion-database" to "/presentation/notion/database/v2/notion-database.css",
+        )
+        val assets = styles.associate { (key, path) ->
+            val assetReference = PresentationAssetRef(key, if (key == "notion-database") 2 else 1, resourceIntegrity(path))
+            assetReference to PresentationAssetDescriptor(path, "text/css", assetReference.integrity)
+        }
+        val scripts = listOf(
+            "notion-tabs" to "/presentation/notion/v1/notion.js",
+            "notion-database-behavior" to "/presentation/notion/database/v2/notion-database.js",
+        ).associate { (key, path) ->
+            val reference = PresentationAssetRef(key, 1, resourceIntegrity(path))
+            reference to PresentationAssetDescriptor(path, "text/javascript", reference.integrity)
+        }
+        val preview = base.copy(
+            presentation = base.presentation.copy(styleSheets = assets.keys.toList(), scripts = scripts.keys.toList()),
+            presentationAssets = assets + scripts,
+        )
+
+        val html = render(preview)
+
+        assertThat(html).contains("제품 개발 · Product roadmap", "공개 항목 없음 · No published items", "very-long-unbroken-value", "notion-database.css", "notion.js")
+        val previewPath = Path.of("build", "qa", "inline-database-views.html")
+        Files.createDirectories(previewPath.parent)
+        Files.writeString(previewPath, html)
+        checkNotNull(javaClass.classLoader.getResourceAsStream("qa/preview-cover.svg")).use { source ->
+            Files.copy(source, previewPath.parent.resolve("preview-cover.svg"), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    @Test
     fun `canonicalizes supported embeds and degrades unsupported providers to a safe link`() {
         val caption = listOf(InlineContent.Text("Watch externally"))
         val page = page(
@@ -488,6 +770,9 @@ class PostPageViewAssemblerTest {
                 BlockNode(BlockId("columns"), LayoutBlockContent.ColumnList, children = listOf(BlockNode(BlockId("column"), LayoutBlockContent.Column(WidthToken(0.5)), children = listOf(node("column-child", TextBlockContent.Paragraph(rich)))))),
                 BlockNode(BlockId("tabs"), LayoutBlockContent.TabContainer, children = listOf(BlockNode(BlockId("tab"), LayoutBlockContent.TabItem(rich, null), children = listOf(node("tab-child", TextBlockContent.Paragraph(rich)))))),
                 BlockNode(BlockId("table"), LayoutBlockContent.Table(1, true, true), children = listOf(BlockNode(BlockId("row"), LayoutBlockContent.TableRow(listOf(rich))))),
+                node("data-table", dataTable("Database view", listOf("Name"), listOf(DataRow(listOf(rich))))),
+                node("data-list", DataViewContent.ListView(DataSet("Database list", listOf(DataColumn("Name")), listOf(DataRow(listOf(rich)))))),
+                node("data-gallery", DataViewContent.Gallery(DataSet("Database gallery", listOf(DataColumn("Name")), listOf(DataRow(listOf(rich)))))),
                 node("image", MediaBlockContent.Media(MediaType.IMAGE, MediaSource.External(URI("https://example.com/image")), "image")),
                 node("video", MediaBlockContent.Media(MediaType.VIDEO, MediaSource.External(URI("https://example.com/video")), "video")),
                 node("audio", MediaBlockContent.Media(MediaType.AUDIO, MediaSource.External(URI("https://example.com/audio")), "audio")),
@@ -514,7 +799,7 @@ class PostPageViewAssemblerTest {
 
         assertThat(kinds).contains(
             "PARAGRAPH", "HEADING", "QUOTE", "TOGGLE", "CALLOUT", "CODE", "EQUATION", "LIST", "DIVIDER",
-            "COLUMN_LIST", "TAB_CONTAINER", "TABLE", "MEDIA", "BOOKMARK", "LINK_PREVIEW", "EMBED", "CHILD_POST",
+            "COLUMN_LIST", "TAB_CONTAINER", "TABLE", "DATA_TABLE", "DATA_LIST", "DATA_GALLERY", "MEDIA", "BOOKMARK", "LINK_PREVIEW", "EMBED", "CHILD_POST",
             "DOCUMENT_LINK", "DATABASE_LINK", "BREADCRUMB", "TABLE_OF_CONTENTS", "SYNCHRONIZED", "TEMPLATE",
             "MEETING_NOTES", "UNSUPPORTED",
         )
@@ -555,12 +840,19 @@ class PostPageViewAssemblerTest {
         )
     }
 
+    private fun dataTable(title: String, columns: List<String>, rows: List<DataRow>): DataViewContent.Table = DataViewContent.Table(DataSet(title, columns.map { DataColumn(it) }, rows))
+
     private fun node(id: String, content: BlockContent): BlockNode = BlockNode(BlockId(id), content)
 
     private fun render(page: BlogPage): String = templateEngine().process(
         "blog/post",
         Context().apply { setVariable("page", assembler.assemble(page)) },
     )
+
+    private fun resourceIntegrity(publicPath: String): String {
+        val bytes = checkNotNull(javaClass.classLoader.getResourceAsStream("static$publicPath")).use { it.readBytes() }
+        return "sha256-" + Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes))
+    }
 
     private fun templateEngine(): SpringTemplateEngine = SpringTemplateEngine().apply {
         setTemplateResolver(

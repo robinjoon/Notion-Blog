@@ -10,9 +10,12 @@ internal data class NotionPageResponse(
     val inTrash: Boolean,
     val lastEditedTime: String,
     val properties: JsonNode,
+    val icon: JsonNode? = null,
+    val cover: JsonNode? = null,
 )
 
 internal data class NotionPageParentResponse(
     val type: String,
     val pageId: String?,
+    val dataSourceId: String? = null,
 )
