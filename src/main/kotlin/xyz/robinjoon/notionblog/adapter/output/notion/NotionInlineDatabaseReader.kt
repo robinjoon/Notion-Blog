@@ -3,12 +3,12 @@ package xyz.robinjoon.notionblog.adapter.output.notion
 import xyz.robinjoon.notionblog.adapter.output.notion.client.NotionApiClient
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDataSourceResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseProperty
-import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionDatabaseViewResponse
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryAspect
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryCover
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGalleryLayout
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionGallerySize
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionPaginationResponse
+import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionViewColumn
 import xyz.robinjoon.notionblog.adapter.output.notion.dto.NotionViewConfiguration
 import xyz.robinjoon.notionblog.adapter.output.notion.mapping.NotionBlockMapper
 import xyz.robinjoon.notionblog.adapter.output.notion.mapping.NotionDatabaseCellMapper
@@ -93,15 +93,15 @@ internal class NotionInlineDatabaseReader(
             requireMatchingId(view.databaseId, databaseId)
             if (view.type !in setOf("table", "list", "gallery")) return null
             name = view.name.ifBlank { name }
-            val columns = view.columns
             val configuration = view.configuration
-            if (view.dataSourceId == null || columns.isNullOrEmpty() || configuration == null) {
+            if (view.dataSourceId == null || view.columns?.isEmpty() == true || configuration == null) {
                 unavailable(id, reserve)
             } else {
                 val sourceId = NotionIdNormalizer.normalize(view.dataSourceId)
                 val schema = schemas.getOrPut(sourceId) { request(checkDeadline) { client.fetchDataSource(sourceId) } }
                 requireMatchingId(schema.id, sourceId)
-                val selected = selectedColumns(view, schema, reserve)
+                val columns = view.columns ?: defaultColumns(schema)
+                val selected = selectedColumns(columns, schema, reserve)
                 validateCoverProperty(configuration, schema)
                 val rows = readRows(viewId, sourceId, selected, configuration, checkDeadline, reserve)
                 val data = DataSet(
@@ -159,15 +159,21 @@ internal class NotionInlineDatabaseReader(
         }
     }
 
+    private fun defaultColumns(schema: NotionDataSourceResponse): List<NotionViewColumn> {
+        val title = schema.properties.singleOrNull { it.type == "title" }
+            ?: throw SourceMappingException("Notion data source must have exactly one title property")
+        return listOf(NotionViewColumn(title.id, null))
+    }
+
     private fun selectedColumns(
-        view: NotionDatabaseViewResponse,
+        columns: List<NotionViewColumn>,
         schema: NotionDataSourceResponse,
         reserve: () -> Unit,
     ): List<NotionDatabaseProperty> {
         val properties = schema.properties.associateBy { it.id }
         if (properties.size != schema.properties.size) throw SourceMappingException("Notion database property IDs must be unique")
         val seen = mutableSetOf<String>()
-        return view.columns.orEmpty().map { column ->
+        return columns.map { column ->
             if (!seen.add(column.propertyId)) throw SourceMappingException("Notion view property IDs must be unique")
             reserve()
             val property = properties[column.propertyId]

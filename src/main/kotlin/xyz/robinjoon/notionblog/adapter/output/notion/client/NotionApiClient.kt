@@ -137,7 +137,7 @@ internal class NotionApiClient(
                 type = type,
                 dataSourceId = response.nullableText("data_source_id"),
                 columns = configuration?.let(::parseViewColumns),
-                configuration = configuration?.let { parseViewConfiguration(it, type) },
+                configuration = if (type in SUPPORTED_VIEW_TYPES) parseViewConfiguration(configuration, type) else null,
             )
         }
     }
@@ -302,29 +302,29 @@ internal class NotionApiClient(
         }
     }
 
-    private fun parseViewConfiguration(configuration: JsonNode, type: String): NotionViewConfiguration = when (type) {
+    private fun parseViewConfiguration(configuration: JsonNode?, type: String): NotionViewConfiguration = when (type) {
         "table" -> NotionViewConfiguration.Table(
-            wrapCells = configuration.nullableBoolean("wrap_cells") ?: true,
-            frozenColumns = configuration.nullableNonnegativeInt("frozen_column_index") ?: 0,
-            showVerticalLines = configuration.nullableBoolean("show_vertical_lines") ?: true,
+            wrapCells = configuration?.nullableBoolean("wrap_cells") ?: true,
+            frozenColumns = configuration?.nullableNonnegativeInt("frozen_column_index") ?: 0,
+            showVerticalLines = configuration?.nullableBoolean("show_vertical_lines") ?: true,
         )
 
         "list" -> NotionViewConfiguration.ListView
 
         "gallery" -> NotionViewConfiguration.Gallery(
-            cover = configuration.nullableObject("cover")?.let(::parseGalleryCover),
-            size = when (configuration.nullableText("cover_size")) {
+            cover = configuration?.nullableObject("cover")?.let(::parseGalleryCover),
+            size = when (configuration?.nullableText("cover_size")) {
                 null, "medium" -> NotionGallerySize.MEDIUM
                 "small" -> NotionGallerySize.SMALL
                 "large" -> NotionGallerySize.LARGE
                 else -> throw IllegalArgumentException("Invalid gallery size")
             },
-            aspect = when (configuration.nullableText("cover_aspect")) {
+            aspect = when (configuration?.nullableText("cover_aspect")) {
                 null, "cover" -> NotionGalleryAspect.COVER
                 "contain" -> NotionGalleryAspect.CONTAIN
                 else -> throw IllegalArgumentException("Invalid gallery aspect")
             },
-            layout = when (configuration.nullableText("card_layout")) {
+            layout = when (configuration?.nullableText("card_layout")) {
                 null, "list" -> NotionGalleryLayout.LIST
                 "compact" -> NotionGalleryLayout.COMPACT
                 else -> throw IllegalArgumentException("Invalid gallery layout")

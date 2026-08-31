@@ -13,6 +13,7 @@ internal data class NotionDatabaseViewResponse(
     val name: String,
     val type: String,
     val dataSourceId: String?,
+    /** Null means no property settings; an empty list explicitly exposes no columns. */
     val columns: List<NotionViewColumn>?,
     val configuration: NotionViewConfiguration? = null,
 )
