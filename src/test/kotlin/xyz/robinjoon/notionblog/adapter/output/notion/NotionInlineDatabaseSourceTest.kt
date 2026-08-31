@@ -291,21 +291,52 @@ class NotionInlineDatabaseSourceTest {
     }
 
     @Test
-    fun `does not guess visible properties when a view is partial or has no visible columns`() {
+    fun `imports only the title when visible property settings are absent and revises the previous fallback`() {
         fixture()
-        every { client.fetchDatabaseView(VIEW) } returns view().copy(columns = null)
-
-        val partial = source().fetch(reference())
-
-        assertThat(dataSets(partial.content.roots.single())).isEmpty()
-        assertThat(nodes(partial.content.roots.single()).any { it.content is UnsupportedBlockContent }).isTrue()
-        verify(exactly = 0) { client.createViewQuery(any()) }
-        verify(exactly = 0) { client.fetchDataSource(any()) }
-
         every { client.fetchDatabaseView(VIEW) } returns view().copy(columns = emptyList())
+        val previous = source().fetch(reference())
+        every { client.fetchDatabaseView(VIEW) } returns view().copy(columns = null)
+        every { client.fetchPage(ROW, listOf("title")) } returns row(ROW)
+
+        val imported = source().fetch(reference())
+
+        val data = dataSets(imported.content.roots.single()).single()
+        assertThat(data.columns.map { it.name }).containsExactly("Name")
+        assertThat(data.titleColumnIndex).isZero()
+        assertThat(data.rows.single().cells.map(::text)).containsExactly("First")
+        assertThat(data.toString()).doesNotContain("Hidden secret", "Status", "Done")
+        assertThat(imported.sourceRevision).isNotEqualTo(previous.sourceRevision)
+        assertThat(source().fetch(reference()).sourceRevision).isEqualTo(imported.sourceRevision)
+        verify(exactly = 0) { client.fetchPage(ROW, listOf("title", "status")) }
+    }
+
+    @Test
+    fun `does not restore explicitly empty columns or query a view without its source or layout`() {
+        fixture()
+        every { client.fetchDatabaseView(VIEW) } returns view().copy(columns = emptyList())
+        assertThat(dataSets(source().fetch(reference()).content.roots.single())).isEmpty()
+        every { client.fetchDatabaseView(VIEW) } returns view().copy(dataSourceId = null, columns = null)
         assertThat(dataSets(source().fetch(reference()).content.roots.single())).isEmpty()
         every { client.fetchDatabaseView(VIEW) } returns view().copy(configuration = null)
         assertThat(dataSets(source().fetch(reference()).content.roots.single())).isEmpty()
+        verify(exactly = 0) { client.createViewQuery(any()) }
+        verify(exactly = 0) { client.fetchDataSource(any()) }
+    }
+
+    @Test
+    fun `rejects default schemas without a unique title rather than choosing another property`() {
+        fixture()
+        every { client.fetchDatabaseView(VIEW) } returns view().copy(columns = null)
+        listOf(
+            listOf(NotionDatabaseProperty("status", "Status", "status")),
+            listOf(NotionDatabaseProperty("title", "Name", "title"), NotionDatabaseProperty("second-title", "Other", "title")),
+            listOf(NotionDatabaseProperty("title", "Name", "title"), NotionDatabaseProperty("title", "Duplicate", "rich_text")),
+        ).forEach { properties ->
+            every { client.fetchDataSource(DATA_SOURCE) } returns NotionDataSourceResponse(DATA_SOURCE, properties)
+
+            assertThatThrownBy { source().fetch(reference()) }.isInstanceOf(SourceMappingException::class.java)
+        }
+        verify(exactly = 0) { client.createViewQuery(any()) }
     }
 
     @Test

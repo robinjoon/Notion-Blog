@@ -198,7 +198,7 @@ class NotionDatabaseApiClientTest {
     }
 
     @Test
-    fun `leaves partial view visibility unknown instead of exposing the whole schema`() {
+    fun `defaults a known layout without inventing a missing data source or visible columns`() {
         enqueueJson(
             """
             {"object":"view","id":"view-1","parent":{"type":"database_id","database_id":"database-1"},"type":"table"}
@@ -208,9 +208,33 @@ class NotionDatabaseApiClientTest {
         val view = client().fetchDatabaseView("view-1")
 
         assertThat(view.columns).isNull()
-        assertThat(view.configuration).isNull()
+        assertThat(view.configuration).isEqualTo(NotionViewConfiguration.Table())
         assertThat(view.dataSourceId).isNull()
         assertThat(view.name).isNotBlank()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["table", "list", "gallery"])
+    fun `uses typed defaults for omitted and null configuration`(type: String) {
+        val expected = when (type) {
+            "table" -> NotionViewConfiguration.Table()
+            "list" -> NotionViewConfiguration.ListView
+            else -> NotionViewConfiguration.Gallery()
+        }
+        listOf("", ",\"configuration\":null").forEach { configuration ->
+            enqueueJson(
+                """
+                {"object":"view","id":"view-1","parent":{"type":"database_id","database_id":"database-1"},
+                 "type":"$type","data_source_id":"source-1"$configuration}
+                """,
+            )
+
+            val view = client().fetchDatabaseView("view-1")
+
+            assertThat(view.configuration).isEqualTo(expected)
+            assertThat(view.columns).isNull()
+            assertThat(view.dataSourceId).isEqualTo("source-1")
+        }
     }
 
     @Test
