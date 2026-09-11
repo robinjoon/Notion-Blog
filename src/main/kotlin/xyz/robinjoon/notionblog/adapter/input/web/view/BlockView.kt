@@ -231,6 +231,7 @@ data class TabContainerView(
     override val id: String,
     val tabs: List<TabItemView>,
     override val style: BlockStyleView,
+    val collapseSingleTab: Boolean = false,
 ) : BlockView {
     override val kind = BlockKind.TAB_CONTAINER
     override val children: List<BlockView> = emptyList()

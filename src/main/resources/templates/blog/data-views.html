@@ -3,7 +3,7 @@
          th:id="${block.id}" th:classappend="${#strings.listJoin(block.style.classes, ' ') + (block.showVerticalLines ? '' : ' notion-data-table-no-vertical-lines')}"
          role="region" tabindex="0" th:attr="aria-labelledby=${block.id + '-caption'},data-frozen-columns=${block.frozenColumns}">
         <table class="notion-table notion-data-table">
-            <caption th:id="${block.id + '-caption'}" th:text="${block.title}">Database view</caption>
+            <caption class="notion-sr-only" th:id="${block.id + '-caption'}" th:text="${block.title}">Database view</caption>
             <thead><tr><th th:each="column : ${block.columns}" th:classappend="${#strings.listJoin(column.classes, ' ')}" scope="col"><div class="notion-data-table-cell" th:tabindex="${column.wrap ? null : 0}" th:text="${column.name}">Column</div></th></tr></thead>
             <tbody>
                 <tr th:each="row : ${block.rows}">
@@ -44,7 +44,7 @@
 <th:block th:fragment="list(block)">
     <section class="notion-block notion-data-list" th:id="${block.id}" th:classappend="${#strings.listJoin(block.style.classes, ' ')}"
              th:attr="aria-labelledby=${block.id + '-title'}">
-        <h3 class="notion-data-view-title" th:id="${block.id + '-title'}" th:text="${block.title}">Database list</h3>
+        <span class="notion-data-view-title notion-sr-only" th:id="${block.id + '-title'}" th:text="${block.title}">Database list</span>
         <ul th:if="${!#lists.isEmpty(block.rows)}" class="notion-data-list-items">
             <li th:each="row : ${block.rows}" class="notion-data-list-row">
                 <th:block th:replace="~{blog/data-views :: entryTitle(${row})}"></th:block>
@@ -59,7 +59,7 @@
     <section class="notion-block notion-data-gallery" th:id="${block.id}"
              th:classappend="${#strings.listJoin(block.style.classes, ' ') + ' ' + #strings.listJoin(block.classes, ' ')}"
              th:attr="aria-labelledby=${block.id + '-title'}">
-        <h3 class="notion-data-view-title" th:id="${block.id + '-title'}" th:text="${block.title}">Database gallery</h3>
+        <span class="notion-data-view-title notion-sr-only" th:id="${block.id + '-title'}" th:text="${block.title}">Database gallery</span>
         <ul th:if="${!#lists.isEmpty(block.rows)}" class="notion-data-gallery-grid">
             <li th:each="row : ${block.rows}" class="notion-data-card">
                 <img th:if="${row.coverUrl != null}" class="notion-data-cover" th:src="${row.coverUrl}" th:alt="${row.titleText}" loading="lazy" decoding="async" referrerpolicy="no-referrer">

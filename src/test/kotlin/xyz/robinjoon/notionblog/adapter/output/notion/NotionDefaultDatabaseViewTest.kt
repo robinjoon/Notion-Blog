@@ -224,13 +224,23 @@ class NotionDefaultDatabaseViewTest {
         val assets = listOf(
             "/presentation/notion/v1/notion.css",
             "/presentation/notion/enhancements/v1/notion-enhancements.css",
-            "/presentation/notion/database/v2/notion-database.css",
+            "/presentation/notion/database/v3/notion-database.css",
             "/presentation/notion/v1/notion.js",
             "/presentation/notion/database/v2/notion-database.js",
         ).associate { path ->
             val bytes = checkNotNull(javaClass.classLoader.getResourceAsStream("static$path")).use { it.readBytes() }
             val integrity = "sha256-" + Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes))
-            val reference = PresentationAssetRef(path.substringAfterLast('/'), if (path.contains("/v2/")) 2 else 1, integrity)
+            val reference = PresentationAssetRef(
+                path.substringAfterLast('/'),
+                if (path.contains("/v3/")) {
+                    3
+                } else if (path.contains("/v2/")) {
+                    2
+                } else {
+                    1
+                },
+                integrity,
+            )
             reference to PresentationAssetDescriptor(path, if (path.endsWith(".css")) "text/css" else "text/javascript", integrity)
         }
         val profile = PresentationProfile(

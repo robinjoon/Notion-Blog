@@ -36,17 +36,18 @@ class DefaultPresentationAssetsContractTest {
             "notion-enhancements" to 1L,
             "notion-database" to 1L,
             "notion-database" to 2L,
+            "notion-database" to 3L,
             "katex-runtime" to 1L,
             "notion-tabs" to 1L,
             "notion-math" to 1L,
             "notion-database-behavior" to 1L,
         )
         assertThat(assets.filterNot(ConfiguredAsset::current).map { it.key to it.version })
-            .containsExactly("notion-database" to 1L)
+            .containsExactly("notion-database" to 1L, "notion-database" to 2L)
         assertThat(assets.filter(ConfiguredAsset::current).groupBy(ConfiguredAsset::key).values)
             .allSatisfy { versions -> assertThat(versions).hasSize(1) }
         assertThat(assets.single { it.key == "notion-database" && it.current }.publicPath)
-            .isEqualTo("/presentation/notion/database/v2/notion-database.css")
+            .isEqualTo("/presentation/notion/database/v3/notion-database.css")
         assertThat(assets.single { it.key == "notion-database-behavior" }.publicPath)
             .isEqualTo("/presentation/notion/database/v2/notion-database.js")
         assertThat(assets).allSatisfy { asset ->

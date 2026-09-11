@@ -291,7 +291,9 @@ class PostPageViewAssembler(
                 linkView(LinkTarget.SourceDocument(content.reference, content.originalUrl), links),
                 safeExternalUrl(content.originalUrl),
                 style,
-                children,
+                children.map { child ->
+                    if (child is TabContainerView) child.copy(collapseSingleTab = true) else child
+                },
             )
 
             is ReferenceBlockContent.Breadcrumb -> BreadcrumbView(
