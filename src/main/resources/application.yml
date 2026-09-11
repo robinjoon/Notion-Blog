@@ -62,6 +62,12 @@ blog:
         integrity: sha384-Byoo/32d7jkGQ7JNxVuHliHafA+p+T6pBDKa5QQB7qHS9LR/ibKc9wBtt/XyYJaA
         public-path: /presentation/notion/database/v2/notion-database.css
         media-type: text/css
+        current: false
+      - key: notion-database
+        version: 3
+        integrity: sha384-7VCB0fCRGauDBBPBLR9aNEnheWmfm6IEvFTZv+EaXwG5p7upfIx6IhGxcR8HGXC3
+        public-path: /presentation/notion/database/v3/notion-database.css
+        media-type: text/css
         current: true
       - key: katex-runtime
         version: 1

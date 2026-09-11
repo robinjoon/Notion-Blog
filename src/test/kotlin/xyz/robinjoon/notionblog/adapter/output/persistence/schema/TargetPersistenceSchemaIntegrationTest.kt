@@ -79,7 +79,7 @@ class TargetPersistenceSchemaIntegrationTest {
     }
 
     @Test
-    fun `keeps earlier default profiles immutable and activates the three data view catalog-matched version`() {
+    fun `keeps earlier default profiles immutable and activates the Notion-like data view catalog-matched version`() {
         connection { connection ->
             val profiles = connection.prepareStatement(
                 "select profile_key, version, token_json, is_current, created_at from presentation_profile " +
@@ -103,14 +103,15 @@ class TargetPersistenceSchemaIntegrationTest {
                 }
             }
 
-            assertThat(profiles).hasSize(4)
-            assertThat(profiles.map(SeedProfile::version)).containsExactly(1, 2, 3, 4)
-            assertThat(profiles.map(SeedProfile::current)).containsExactly(false, false, false, true)
+            assertThat(profiles).hasSize(5)
+            assertThat(profiles.map(SeedProfile::version)).containsExactly(1, 2, 3, 4, 5)
+            assertThat(profiles.map(SeedProfile::current)).containsExactly(false, false, false, false, true)
             assertThat(profiles.map(SeedProfile::createdAt)).containsExactly(
                 Instant.parse("2026-08-25T00:00:00Z"),
                 Instant.parse("2026-08-27T00:00:00Z"),
                 Instant.parse("2026-08-31T00:00:00Z"),
                 Instant.parse("2026-08-31T00:00:00Z"),
+                Instant.parse("2026-09-10T00:00:00Z"),
             )
             profiles.forEach { profile ->
                 assertThat(profile.key).isEqualTo("notion-default")
@@ -119,7 +120,7 @@ class TargetPersistenceSchemaIntegrationTest {
                 )
             }
 
-            val assets = profileAssets(connection, 4)
+            val assets = profileAssets(connection, 5)
             val configuredIntegrity = configuredAssetIntegrity()
 
             assertThat(assets).containsExactly(
@@ -147,8 +148,8 @@ class TargetPersistenceSchemaIntegrationTest {
                 SeedAsset(
                     "STYLE_SHEET",
                     "notion-database",
-                    2,
-                    configuredIntegrity.getValue("notion-database" to 2L),
+                    3,
+                    configuredIntegrity.getValue("notion-database" to 3L),
                     3,
                 ),
                 SeedAsset(
@@ -170,6 +171,15 @@ class TargetPersistenceSchemaIntegrationTest {
                 }
             }
             assertThat(profileAssets(connection, 3)).containsExactlyElementsOf(previousAssets)
+            assertThat(profileAssets(connection, 4)).containsExactlyElementsOf(
+                assets.map { asset ->
+                    if (asset.key == "notion-database") {
+                        asset.copy(version = 2, integrity = configuredIntegrity.getValue("notion-database" to 2L))
+                    } else {
+                        asset
+                    }
+                },
+            )
             assertThat(profileAssets(connection, 2)).containsExactlyElementsOf(previousAssets.filterNot { it.key == "notion-database" })
             assertThat(profileAssets(connection, 1)).containsExactly(
                 SeedAsset("STYLE_SHEET", "notion-core", 1, configuredIntegrity.getValue("notion-core" to 1L), 0),
@@ -198,10 +208,11 @@ class TargetPersistenceSchemaIntegrationTest {
             DEFAULT_PROFILE_ID to 1L,
             DEFAULT_PROFILE_ID to 2L,
             DEFAULT_PROFILE_ID to 3L,
+            DEFAULT_PROFILE_ID to 4L,
             UUID.randomUUID() to 1L,
         ).forEach { (profileId, previousVersion) ->
             val schema = "profile_upgrade_" + UUID.randomUUID().toString().replace("-", "")
-            migrateSchema(schema, "4")
+            migrateSchema(schema, "5")
             connection { connection ->
                 connection.createStatement().use { it.execute("set search_path to $schema") }
                 val publicationId = UUID.randomUUID()
@@ -228,7 +239,7 @@ class TargetPersistenceSchemaIntegrationTest {
                         assertThat(rows.next()).isTrue()
                         assertThat(rows.getObject("presentation_profile_id", UUID::class.java)).isEqualTo(profileId)
                         assertThat(rows.getLong("presentation_profile_version"))
-                            .isEqualTo(if (profileId == DEFAULT_PROFILE_ID) 4L else previousVersion)
+                            .isEqualTo(if (profileId == DEFAULT_PROFILE_ID) 5L else previousVersion)
                         assertThat(rows.next()).isFalse()
                     }
                 }

@@ -382,7 +382,7 @@ class PostPageViewAssemblerTest {
         assertThat((view.rows[0].cells[0].single() as TextInlineView).annotations.bold).isTrue()
         assertThat((view.rows[1].cells[0].single() as TextInlineView).link).isNull()
         assertThat(html).contains("notion-data-table-wrapper", "role=\"region\"", "tabindex=\"0\"", "aria-labelledby=\"database-table-caption\"")
-        assertThat(table).contains("<caption id=\"database-table-caption\">Roadmap &lt;script&gt;unsafe&lt;/script&gt;</caption>", "<thead>", "<tbody>")
+        assertThat(table).contains("class=\"notion-sr-only\"", "Roadmap &lt;script&gt;unsafe&lt;/script&gt;</caption>", "<thead>", "<tbody>")
         assertThat(Regex("scope=\"col\"").findAll(table).count()).isEqualTo(2)
         assertThat(Regex("<tr>").findAll(table.substringAfter("<tbody>")).count()).isEqualTo(2)
         assertThat(table).contains(
@@ -402,7 +402,7 @@ class PostPageViewAssemblerTest {
         val html = render(page(listOf(node("empty-database", dataTable("Published tasks", listOf("Task", "Owner"), emptyList())))))
         val table = html.substringAfter("<table class=\"notion-table notion-data-table\"").substringBefore("</table>")
 
-        assertThat(table).contains("<caption id=\"empty-database-caption\">Published tasks</caption>", ">Task</div>", ">Owner</div>")
+        assertThat(table).contains("class=\"notion-sr-only\"", "Published tasks</caption>", ">Task</div>", ">Owner</div>")
         assertThat(table).contains("colspan=\"2\"", "notion-data-table-empty", "No published rows in this view.")
         assertThat(table.substringAfter("<tbody>")).doesNotContain("notion-data-table-cell")
     }
@@ -430,6 +430,48 @@ class PostPageViewAssemblerTest {
         assertThat(markup).contains("Team tasks", "role=\"tablist\"", "aria-selected=\"true\"", "aria-selected=\"false\"", "Active", "Archive")
         assertThat(Regex("class=\"notion-table notion-data-table\"").findAll(markup).count()).isEqualTo(2)
         assertThat(markup).doesNotContain(" unavailable")
+    }
+
+    @Test
+    fun `renders a single database view directly with its repeated name available only to assistive technology`() {
+        val viewName = "Untitled <script>unsafe</script>"
+        val tab = BlockNode(
+            BlockId("database-view"),
+            LayoutBlockContent.TabItem(listOf(InlineContent.Text(viewName)), null),
+            children = listOf(
+                node(
+                    "database-gallery",
+                    DataViewContent.Gallery(
+                        DataSet(
+                            viewName,
+                            listOf(DataColumn("Name")),
+                            listOf(DataRow(listOf(listOf(InlineContent.Text("Published note"))))),
+                            titleColumnIndex = 0,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val database = BlockNode(
+            BlockId("database"),
+            ReferenceBlockContent.DatabaseLink(SourceDocumentRef(SourceId("notion"), "database"), null, "Blog posts"),
+            children = listOf(BlockNode(BlockId("database-views"), LayoutBlockContent.TabContainer, children = listOf(tab))),
+        )
+
+        val html = render(page(listOf(database)))
+        val markup = html.substringAfter("id=\"database\"").substringBefore("</aside>")
+
+        assertThat(markup).contains(
+            "<h2 class=\"notion-database-title\"><span>Blog posts</span></h2>",
+            "notion-data-gallery",
+            "Published note",
+        )
+        assertThat(markup).doesNotContain("role=\"tablist\"", "role=\"tab\"", "role=\"tabpanel\"", "class=\"notion-tabs\"")
+        assertThat(markup).contains(
+            "<span class=\"notion-data-view-title notion-sr-only\"",
+            "Untitled &lt;script&gt;unsafe&lt;/script&gt;",
+        )
+        assertThat(markup).doesNotContain("<h3 class=\"notion-data-view-title", "<script>unsafe</script>")
     }
 
     @Test
@@ -576,10 +618,10 @@ class PostPageViewAssemblerTest {
         val styles = listOf(
             "notion" to "/presentation/notion/v1/notion.css",
             "notion-enhancements" to "/presentation/notion/enhancements/v1/notion-enhancements.css",
-            "notion-database" to "/presentation/notion/database/v2/notion-database.css",
+            "notion-database" to "/presentation/notion/database/v3/notion-database.css",
         )
         val assets = styles.associate { (key, path) ->
-            val assetReference = PresentationAssetRef(key, if (key == "notion-database") 2 else 1, resourceIntegrity(path))
+            val assetReference = PresentationAssetRef(key, if (key == "notion-database") 3 else 1, resourceIntegrity(path))
             assetReference to PresentationAssetDescriptor(path, "text/css", assetReference.integrity)
         }
         val scripts = listOf(

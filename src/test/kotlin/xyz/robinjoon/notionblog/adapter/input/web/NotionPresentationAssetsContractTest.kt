@@ -164,6 +164,23 @@ class NotionPresentationAssetsContractTest {
         assertThat(css).doesNotContain("javascript:", "url(http", "expression(")
     }
 
+    @Test
+    fun `ships Notion-like database sections without repeated visible view headings or generic reference card chrome`() {
+        val css = resourceText("static/presentation/notion/database/v3/notion-database.css")
+
+        assertThat(css).contains(
+            ".notion-database",
+            ".notion-database-title",
+            "border: 0",
+            "box-shadow: none",
+            "background: transparent",
+            ".notion-data-view-title.notion-sr-only",
+            ".notion-data-table caption.notion-sr-only",
+            "@media (max-width: 720px)",
+        )
+        assertThat(css).doesNotContain("javascript:", "url(http", "expression(")
+    }
+
     private fun resourceText(path: String): String = checkNotNull(javaClass.classLoader.getResource(path)) {
         "Missing presentation asset: $path"
     }.readText()
