@@ -54,11 +54,15 @@ jobs:
         uses: robinjoon/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
         with:
           app: zot
+      - name: Load harness credentials from SMS
+        uses: robinjoon/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
+        with:
+          app: harness
       - name: Validate publish configuration
         shell: bash
         run: |
           set -euo pipefail
-          for name in REGISTRY_HOST REGISTRY_IMAGE REGISTRY_USERNAME REGISTRY_PASSWORD; do
+          for name in REGISTRY_HOST REGISTRY_IMAGE REGISTRY_USERNAME REGISTRY_PASSWORD HARNESS_ACTIONS_TOKEN; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is not configured"
               exit 1
@@ -86,7 +90,7 @@ jobs:
         if: success() && github.ref == 'refs/heads/master'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.HARNESS_ACTIONS_TOKEN }}
+          GH_TOKEN: ${{ env.HARNESS_ACTIONS_TOKEN }}
         run: |
           set -euo pipefail
           latest_sha="$(git ls-remote --exit-code origin refs/heads/master | awk '{print $1}')"

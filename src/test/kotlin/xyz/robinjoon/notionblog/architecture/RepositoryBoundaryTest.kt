@@ -36,8 +36,8 @@ class RepositoryBoundaryTest {
             .contains("IMAGE_TAG: sha-\${{ github.sha }}-run-\${{ github.run_id }}-\${{ github.run_attempt }}")
         assertThat(workflow).contains("push: true")
         assertThat(workflow).contains("github.ref == 'refs/heads/master'")
-        assertThat(workflow).contains("HOMELAB_REGISTRY_USERNAME")
-        assertThat(workflow).contains("HOMELAB_REGISTRY_PASSWORD")
+        assertThat(workflow).contains("username: \${{ env.REGISTRY_USERNAME }}")
+        assertThat(workflow).contains("password: \${{ env.REGISTRY_PASSWORD }}")
         assertThat(workflow)
             .doesNotContain("HARNESS_DEPLOY_KEY", "tools/platform.py", "git push origin HEAD:main")
         assertThat(workflow).doesNotContain("bootstrap-homelab", "deploy-*", "kubectl", "KUBECONFIG")
@@ -59,7 +59,7 @@ class RepositoryBoundaryTest {
             "group: notion-blog-ci-\${{ github.ref == 'refs/heads/master' && 'master' || github.run_id }}",
             "cancel-in-progress: \${{ github.ref == 'refs/heads/master' }}",
             "if: success() && github.ref == 'refs/heads/master'",
-            "GH_TOKEN: \${{ secrets.HARNESS_ACTIONS_TOKEN }}",
+            "GH_TOKEN: \${{ env.HARNESS_ACTIONS_TOKEN }}",
             "tags: \${{ env.REGISTRY_HOST }}/\${{ env.REGISTRY_IMAGE }}:\${{ env.IMAGE_TAG }}",
             "if [[ \"\$latest_sha\" != \"\$GITHUB_SHA\" ]]",
             "--repo robinjoon/Simple-K3S-Herness",
@@ -70,6 +70,27 @@ class RepositoryBoundaryTest {
         )
         assertThat(workflow).doesNotContain(":latest", "if: always()", "continue-on-error: true")
         assertThat(workflow.split("docker/build-push-action@")).hasSize(2)
+    }
+
+    @Test
+    fun `ci loads both SMS credential objects before validation without legacy secret references`() {
+        val workflow = Files.readString(Path.of(".github/workflows/ci.yml"))
+        val publishJob = workflow.substringAfter("  publish:")
+        val registryLoad = publishJob.indexOf("- name: Load registry credentials from SMS")
+        val harnessLoad = publishJob.indexOf("- name: Load harness credentials from SMS")
+        val validation = publishJob.indexOf("- name: Validate publish configuration")
+
+        assertThat(registryLoad).isGreaterThanOrEqualTo(0)
+        assertThat(harnessLoad).isGreaterThan(registryLoad)
+        assertThat(validation).isGreaterThan(harnessLoad)
+        assertThat(publishJob).contains("id-token: write", "app: zot", "app: harness")
+        assertThat(publishJob.split("load-ci-secrets@v1.0.0")).hasSize(3)
+        assertThat(workflow.substringBefore("  publish:")).doesNotContain("id-token: write")
+        assertThat(workflow).doesNotContain(
+            "secrets.HOMELAB_REGISTRY_USERNAME",
+            "secrets.HOMELAB_REGISTRY_PASSWORD",
+            "secrets.HARNESS_ACTIONS_TOKEN",
+        )
     }
 
     @Test
