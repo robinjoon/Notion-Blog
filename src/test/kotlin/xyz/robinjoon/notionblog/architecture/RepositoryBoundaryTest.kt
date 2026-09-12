@@ -62,7 +62,7 @@ class RepositoryBoundaryTest {
             "GH_TOKEN: \${{ env.HARNESS_ACTIONS_TOKEN }}",
             "tags: \${{ env.REGISTRY_HOST }}/\${{ env.REGISTRY_IMAGE }}:\${{ env.IMAGE_TAG }}",
             "if [[ \"\$latest_sha\" != \"\$GITHUB_SHA\" ]]",
-            "--repo robinjoon/Simple-K3S-Herness",
+            "--repo robinjoon-homelab/Simple-K3S-Herness",
             "--ref main",
             "-f app=notion-blog",
             "-f container=app",
@@ -99,7 +99,7 @@ class RepositoryBoundaryTest {
 
         assertThat(readme).contains(
             "HARNESS_ACTIONS_TOKEN",
-            "robinjoon/Simple-K3S-Herness",
+            "robinjoon-homelab/Simple-K3S-Herness",
             "`Actions: write`",
         )
     }

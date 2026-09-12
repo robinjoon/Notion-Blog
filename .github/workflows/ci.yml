@@ -51,11 +51,11 @@ jobs:
       - name: Check out application
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Load registry credentials from SMS
-        uses: robinjoon/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
+        uses: robinjoon-homelab/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
         with:
           app: zot
       - name: Load harness credentials from SMS
-        uses: robinjoon/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
+        uses: robinjoon-homelab/Simple-K3S-Herness/.github/actions/load-ci-secrets@v1.0.0
         with:
           app: harness
       - name: Validate publish configuration
@@ -100,7 +100,7 @@ jobs:
           fi
 
           gh workflow run release-workload-image.yml \
-            --repo robinjoon/Simple-K3S-Herness \
+            --repo robinjoon-homelab/Simple-K3S-Herness \
             --ref main \
             -f app=notion-blog \
             -f container=app \
